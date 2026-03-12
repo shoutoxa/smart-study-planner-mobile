@@ -4,8 +4,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useColorScheme } from "nativewind";
-
+import { useColorScheme } from "react-native";
 // Import Screens
 import DashboardScreen from "../screens/DashboardScreen";
 import CoursesScreen from "../screens/CoursesScreen";
@@ -18,8 +17,10 @@ const Stack = createNativeStackNavigator();
 
 const CustomTabBarButton = ({ children, onPress }) => (
   <TouchableOpacity
-    className="top-[-20px] justify-center items-center"
     style={{
+      top: -20,
+      justifyContent: "center",
+      alignItems: "center",
       shadowColor: "#3b82f6",
       shadowOpacity: 0.3,
       shadowRadius: 10,
@@ -27,17 +28,36 @@ const CustomTabBarButton = ({ children, onPress }) => (
     }}
     onPress={onPress}
   >
-    <View className="w-16 h-16 rounded-full bg-blue-500 justify-center items-center border-[4px] border-slate-50 dark:border-slate-900 shadow-xl">
+    <View
+      style={{
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: "#6366f1", // indigo-500
+        justifyContent: "center",
+        alignItems: "center",
+        borderWidth: 4,
+        borderColor: "#f8fafc", // slate-50
+      }}
+    >
       {children}
     </View>
-    <Text className="text-[10px] text-blue-500 font-bold mt-1">Catatan</Text>
+    <Text
+      style={{
+        fontSize: 10,
+        color: "#6366f1",
+        fontWeight: "bold",
+        marginTop: 4,
+      }}
+    >
+      Catatan
+    </Text>
   </TouchableOpacity>
 );
 
 // Tab Navigator for main screens
 function BottomTabNavigator() {
-  const insets = useSafeAreaInsets();
-  const { colorScheme } = useColorScheme();
+  const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
 
   return (
@@ -51,7 +71,7 @@ function BottomTabNavigator() {
           } else if (route.name === "Mata Kuliah") {
             iconName = focused ? "book" : "book-outline";
           } else if (route.name === "Catatan") {
-            return <Ionicons name="document-text" size={28} color="#fff" />;
+            return <Ionicons name="add" size={32} color="#fff" />;
           } else if (route.name === "Tugas") {
             iconName = focused
               ? "checkmark-circle"
@@ -61,24 +81,33 @@ function BottomTabNavigator() {
           }
           return <Ionicons name={iconName} size={24} color={color} />;
         },
-        tabBarActiveTintColor: isDark ? "#60A5FA" : "#3B82F6", // blue-400 : blue-500
+        tabBarActiveTintColor: isDark ? "#818CF8" : "#4F46E5", // indigo-400 : indigo-600
         tabBarInactiveTintColor: isDark ? "#64748B" : "#94A3B8", // slate-500 : slate-400
         tabBarStyle: {
-          paddingBottom:
-            Platform.OS === "android" ? insets.bottom + 10 : insets.bottom,
-          paddingTop: 10,
-          height: Platform.OS === "android" ? 70 + insets.bottom : 85,
-          backgroundColor: isDark ? "#0F172A" : "#FFFFFF", // slate-900
-          borderTopWidth: 1,
-          borderTopColor: isDark ? "#1E293B" : "#F1F5F9",
+          position: "absolute",
+          bottom: Platform.OS === "android" ? 15 : 25,
+          left: 20,
+          right: 20,
           elevation: 0,
+          backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+          borderRadius: 24,
+          height: 70,
+          paddingBottom: 10,
+          paddingTop: 10,
+          shadowColor: isDark ? "#000" : "#94A3B8",
+          shadowOffset: {
+            width: 0,
+            height: 10,
+          },
+          shadowOpacity: isDark ? 0.5 : 0.1,
+          shadowRadius: 15,
+          borderTopWidth: 0,
         },
         tabBarLabelStyle: {
           fontSize: 10,
           fontWeight: "bold",
           marginTop: 2,
         },
-        tabBarShowLabel: route.name !== "Catatan",
       })}
     >
       <Tab.Screen

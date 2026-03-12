@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  FlatList,
   TextInput,
   Modal,
   Alert,
@@ -15,8 +14,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { fetchAll, executeWrite } from "../database/dbHelper";
-import { useColorScheme } from "nativewind";
+import { useColorScheme } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import InteractiveCard from "../components/InteractiveCard";
 
 export default function SchedulesScreen() {
   const [schedules, setSchedules] = useState({});
@@ -24,7 +24,7 @@ export default function SchedulesScreen() {
   const [isModalVisible, setModalVisible] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState(null);
 
-  const { colorScheme } = useColorScheme();
+  const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
 
   const daysOfWeek = [
@@ -95,7 +95,7 @@ export default function SchedulesScreen() {
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, []),
+    }, [loadData]),
   );
 
   const parseTimeStr = (timeStr) => {
@@ -185,7 +185,9 @@ export default function SchedulesScreen() {
         );
       }
       setModalVisible(false);
-      loadData();
+      setTimeout(() => {
+        loadData();
+      }, 100);
     } catch (error) {
       console.error("Failed to save schedule:", error);
       Alert.alert("Error", "Gagal menyimpan jadwal");
@@ -200,108 +202,114 @@ export default function SchedulesScreen() {
         style: "destructive",
         onPress: async () => {
           await executeWrite("DELETE FROM class_schedules WHERE id = ?", [id]);
-          loadData();
+          setTimeout(() => {
+            loadData();
+          }, 100);
         },
       },
     ]);
   };
 
-  const renderGroupedSchedules = () => {
+  const renderGroupedSchedules = useCallback(() => {
     return daysOfWeek.map((day) => {
       const daySchedules = schedules[day];
       if (!daySchedules || daySchedules.length === 0) return null;
 
       return (
-        <View
-          key={day}
-          className="bg-white dark:bg-[#1E293B] rounded-3xl p-5 mb-6 shadow-sm border border-slate-100 dark:border-slate-800"
-        >
-          <View className="flex-row justify-between items-center mb-4 border-b border-slate-100 dark:border-slate-700/50 pb-4">
-            <Text className="text-xl font-bold text-blue-500">{day}</Text>
-            <View className="bg-slate-100 dark:bg-slate-700 px-3 py-1.5 rounded-lg">
-              <Text className="text-slate-600 dark:text-slate-300 text-xs font-bold">
-                {daySchedules.length} Kelas
+        <View key={day} className="mb-8">
+          <View className="flex-row items-center mb-4">
+            <View className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/50 rounded-2xl items-center justify-center mr-3 border border-indigo-200 dark:border-indigo-800">
+              <Ionicons name="calendar" size={18} color="#4F46E5" />
+            </View>
+            <Text className="text-xl font-bold font-serif text-[#1a365d] dark:text-white flex-1">
+              {day}
+            </Text>
+            <View className="bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700">
+              <Text className="text-slate-600 dark:text-slate-300 text-[11px] font-bold uppercase tracking-widest">
+                {daySchedules.length} Sesi
               </Text>
             </View>
           </View>
 
           {daySchedules.map((item, index) => (
-            <View
-              key={item.id}
-              className={`flex-row ${
-                index !== daySchedules.length - 1
-                  ? "border-b border-slate-100 dark:border-slate-700/50 mb-5 pb-5"
-                  : ""
-              }`}
-            >
-              <View className="items-center justify-center w-16 mr-3">
-                <Text className="text-slate-800 dark:text-white font-bold text-base">
-                  {item.start_time}
-                </Text>
-                <Text className="text-slate-400 dark:text-slate-500 text-[10px] my-1 font-semibold">
-                  S/D
-                </Text>
-                <Text className="text-slate-600 dark:text-slate-400 font-medium text-sm">
-                  {item.end_time}
-                </Text>
-              </View>
+            <View key={item.id} className="mb-4">
+              <InteractiveCard>
+                <View className="bg-white dark:bg-slate-800 rounded-[28px] p-5 shadow-sm shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex-row">
+                  <View className="items-center justify-center w-16 mr-4 pr-4 border-r border-slate-100 dark:border-slate-700">
+                    <Text className="text-slate-800 dark:text-white font-bold text-base leading-none text-center">
+                      {item.start_time}
+                    </Text>
+                    <Text className="text-emerald-500 dark:text-emerald-400 text-[9px] my-1 font-bold uppercase tracking-widest text-center">
+                      sampai
+                    </Text>
+                    <Text className="text-slate-500 dark:text-slate-400 font-medium text-sm leading-none text-center">
+                      {item.end_time}
+                    </Text>
+                  </View>
 
-              <View className="flex-1 justify-center">
-                <View className="flex-row justify-between items-start">
-                  <Text className="text-base font-bold text-slate-800 dark:text-white mb-2 flex-1 pr-2 leading-snug">
-                    {item.course_name}
-                  </Text>
-                  <View className="flex-row -mt-1 -mr-1">
-                    <TouchableOpacity
-                      onPress={() => openEditModal(item)}
-                      className="p-2"
-                    >
-                      <Ionicons
-                        name="pencil"
-                        size={16}
-                        color={isDark ? "#94A3B8" : "#64748B"}
-                      />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => confirmDelete(item.id)}
-                      className="p-2"
-                    >
-                      <Ionicons name="trash" size={16} color="#F43F5E" />
-                    </TouchableOpacity>
+                  <View className="flex-1 justify-center">
+                    <View className="flex-row justify-between items-start mb-2">
+                      <Text className="text-[17px] font-bold text-slate-800 dark:text-slate-100 flex-1 pr-2 leading-snug">
+                        {item.course_name}
+                      </Text>
+                      <View className="flex-row -mt-1 -mr-2 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
+                        <TouchableOpacity
+                          onPress={() => openEditModal(item)}
+                          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                          className="p-2"
+                        >
+                          <Ionicons
+                            name="pencil"
+                            size={16}
+                            color={isDark ? "#94A3B8" : "#64748B"}
+                          />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => confirmDelete(item.id)}
+                          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                          className="p-2"
+                        >
+                          <Ionicons name="trash" size={16} color="#F43F5E" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <View className="flex-row flex-wrap gap-2">
+                      <View className="flex-row items-center bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 px-2 py-1 rounded-md">
+                        <Ionicons name="business" size={12} color="#4F46E5" />
+                        <Text className="text-indigo-600 dark:text-indigo-400 text-[11px] ml-1.5 font-bold">
+                          {item.room || "Ruang TBA"}
+                        </Text>
+                      </View>
+                      <View className="flex-row items-center bg-slate-50 dark:bg-slate-700/50 border border-slate-100 dark:border-slate-600 px-2 py-1 rounded-md">
+                        <Ionicons name="person" size={12} color="#64748B" />
+                        <Text
+                          className="text-slate-600 dark:text-slate-300 text-[11px] ml-1.5 font-medium flex-shrink"
+                          numberOfLines={1}
+                        >
+                          {item.lecturer_name || "Tanpa Dosen"}
+                        </Text>
+                      </View>
+                    </View>
                   </View>
                 </View>
-
-                <View className="flex-row items-center bg-slate-50 dark:bg-slate-800/50 self-start px-2 py-1.5 rounded-md mb-2">
-                  <Ionicons name="business" size={12} color="#64748B" />
-                  <Text className="text-slate-600 dark:text-slate-300 text-xs ml-1.5 font-medium">
-                    {item.room || "Ruang TBA"}
-                  </Text>
-                </View>
-
-                <View className="flex-row items-center">
-                  <Ionicons name="person" size={12} color="#64748B" />
-                  <Text
-                    className="text-slate-500 dark:text-slate-400 text-xs ml-1.5"
-                    numberOfLines={1}
-                  >
-                    {item.lecturer_name || "Tanpa Dosen"}
-                  </Text>
-                </View>
-              </View>
+              </InteractiveCard>
             </View>
           ))}
         </View>
       );
     });
-  };
+  }, [schedules, isDark, confirmDelete, openEditModal]);
 
   return (
     <SafeAreaView className="flex-1 bg-slate-50 dark:bg-[#0F172A]">
       {/* Header SmartStudy top */}
-      <View className="px-5 pt-4 pb-2 flex-row justify-between items-center mb-2">
+      <View className="px-6 pt-6 pb-2 flex-row justify-between items-center mb-2">
         <View className="flex-row items-center">
-          <Ionicons name="school" size={24} color="#3B82F6" />
-          <Text className="text-lg font-bold text-slate-800 dark:text-white ml-2">
+          <View className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/50 rounded-2xl items-center justify-center mr-3">
+            <Ionicons name="school" size={20} color="#4F46E5" />
+          </View>
+          <Text className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
             SmartStudy
           </Text>
         </View>
@@ -309,21 +317,29 @@ export default function SchedulesScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} className="pt-2">
         {/* Title and Add Button */}
-        <View className="px-5 mb-8 flex-row justify-between items-end">
+        <View className="px-5 mb-5 mt-4 flex-row justify-between items-end">
           <View className="flex-1 pr-2">
-            <Text className="text-3xl font-extrabold text-slate-800 dark:text-white mb-1">
+            <Text className="text-sm font-semibold text-indigo-500 dark:text-indigo-400 mb-1 tracking-widest uppercase">
+              Kalender
+            </Text>
+            <Text className="text-3xl font-serif font-bold text-[#1a365d] dark:text-white mb-2 tracking-tight">
               Jadwal Kuliah
             </Text>
             <Text className="text-slate-500 dark:text-slate-400 text-sm">
-              Kelola jadwal perkuliahan rutin.
+              Kelola jadwal perkuliahan rutin setiap harinya.
             </Text>
           </View>
-          <TouchableOpacity
-            onPress={openAddModal}
-            className="bg-blue-500 w-14 h-14 rounded-2xl items-center justify-center shadow-lg shadow-blue-500/30"
-          >
-            <Ionicons name="add" size={28} color="white" />
-          </TouchableOpacity>
+        </View>
+
+        <View className="px-5 mb-8">
+          <InteractiveCard onPress={openAddModal}>
+            <View className="bg-indigo-600 dark:bg-indigo-500 rounded-[24px] py-4 flex-row items-center justify-center shadow-md shadow-indigo-500/20">
+              <Ionicons name="add-circle" size={22} color="white" />
+              <Text className="text-white font-bold text-[16px] ml-2 tracking-wide">
+                Tambah Sesi Kuliah
+              </Text>
+            </View>
+          </InteractiveCard>
         </View>
 
         {/* List of Schedules */}
@@ -390,18 +406,36 @@ export default function SchedulesScreen() {
                   <TouchableOpacity
                     key={c.id}
                     onPress={() => setCourseId(c.id)}
-                    className={`px-4 py-3 rounded-xl border mr-2 h-11 justify-center align-middle ${
-                      courseId === c.id
-                        ? "bg-blue-50 dark:bg-blue-900/30 border-blue-500"
-                        : "bg-white dark:bg-[#1E293B] border-slate-200 dark:border-slate-800"
-                    }`}
+                    className="px-4 py-3 rounded-xl border mr-2 h-11 justify-center align-middle"
+                    style={{
+                      backgroundColor:
+                        courseId === c.id
+                          ? isDark
+                            ? "rgba(30, 58, 138, 0.3)"
+                            : "#eff6ff"
+                          : isDark
+                            ? "#1E293B"
+                            : "#ffffff",
+                      borderColor:
+                        courseId === c.id
+                          ? "#3b82f6"
+                          : isDark
+                            ? "#1e293b"
+                            : "#e2e8f0",
+                    }}
                   >
                     <Text
-                      className={
-                        courseId === c.id
-                          ? "text-blue-700 dark:text-blue-400 font-bold"
-                          : "text-slate-600 dark:text-slate-400"
-                      }
+                      style={{
+                        color:
+                          courseId === c.id
+                            ? isDark
+                              ? "#60a5fa"
+                              : "#1d4ed8"
+                            : isDark
+                              ? "#94a3b8"
+                              : "#475569",
+                        fontWeight: courseId === c.id ? "bold" : "normal",
+                      }}
                     >
                       {c.course_name}
                     </Text>
@@ -426,18 +460,36 @@ export default function SchedulesScreen() {
                   <TouchableOpacity
                     key={day}
                     onPress={() => setDayOfWeek(day)}
-                    className={`px-4 flex justify-center items-center rounded-xl border mr-2 h-11 ${
-                      dayOfWeek === day
-                        ? "bg-blue-50 dark:bg-blue-900/30 border-blue-500"
-                        : "bg-white dark:bg-[#1E293B] border-slate-200 dark:border-slate-800"
-                    }`}
+                    className="px-4 flex justify-center items-center rounded-xl border mr-2 h-11"
+                    style={{
+                      backgroundColor:
+                        dayOfWeek === day
+                          ? isDark
+                            ? "rgba(30, 58, 138, 0.3)"
+                            : "#eff6ff"
+                          : isDark
+                            ? "#1E293B"
+                            : "#ffffff",
+                      borderColor:
+                        dayOfWeek === day
+                          ? "#3b82f6"
+                          : isDark
+                            ? "#1e293b"
+                            : "#e2e8f0",
+                    }}
                   >
                     <Text
-                      className={
-                        dayOfWeek === day
-                          ? "text-blue-700 dark:text-blue-400 font-bold"
-                          : "text-slate-600 dark:text-slate-400"
-                      }
+                      style={{
+                        color:
+                          dayOfWeek === day
+                            ? isDark
+                              ? "#60a5fa"
+                              : "#1d4ed8"
+                            : isDark
+                              ? "#94a3b8"
+                              : "#475569",
+                        fontWeight: dayOfWeek === day ? "bold" : "normal",
+                      }}
                     >
                       {day}
                     </Text>
@@ -455,11 +507,15 @@ export default function SchedulesScreen() {
                     className="bg-slate-50 flex-row justify-between items-center dark:bg-[#1E293B] border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-4"
                   >
                     <Text
-                      className={
-                        startTime
-                          ? "text-slate-800 dark:text-white"
-                          : "text-slate-400 dark:text-slate-500"
-                      }
+                      style={{
+                        color: startTime
+                          ? isDark
+                            ? "#ffffff"
+                            : "#1e293b"
+                          : isDark
+                            ? "#64748b"
+                            : "#94a3b8",
+                      }}
                     >
                       {startTime ? startTime : "00:00"}
                     </Text>
@@ -488,11 +544,15 @@ export default function SchedulesScreen() {
                     className="bg-slate-50 flex-row justify-between items-center dark:bg-[#1E293B] border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-4"
                   >
                     <Text
-                      className={
-                        endTime
-                          ? "text-slate-800 dark:text-white"
-                          : "text-slate-400 dark:text-slate-500"
-                      }
+                      style={{
+                        color: endTime
+                          ? isDark
+                            ? "#ffffff"
+                            : "#1e293b"
+                          : isDark
+                            ? "#64748b"
+                            : "#94a3b8",
+                      }}
                     >
                       {endTime ? endTime : "00:00"}
                     </Text>
@@ -533,18 +593,28 @@ export default function SchedulesScreen() {
                   <TouchableOpacity
                     key={type}
                     onPress={() => setClassType(type)}
-                    className={`flex-1 py-3 items-center border-b-2 justify-center ${
-                      classType === type
-                        ? "border-blue-500"
-                        : "border-slate-200 dark:border-slate-800"
-                    }`}
+                    className="flex-1 py-3 items-center border-b-2 justify-center"
+                    style={{
+                      borderColor:
+                        classType === type
+                          ? "#3b82f6"
+                          : isDark
+                            ? "#1e293b"
+                            : "#e2e8f0",
+                    }}
                   >
                     <Text
-                      className={`font-bold ${
-                        classType === type
-                          ? "text-blue-500 dark:text-blue-400"
-                          : "text-slate-400 dark:text-slate-500"
-                      }`}
+                      className="font-bold"
+                      style={{
+                        color:
+                          classType === type
+                            ? isDark
+                              ? "#60a5fa"
+                              : "#3b82f6"
+                            : isDark
+                              ? "#64748b"
+                              : "#94a3b8",
+                      }}
                     >
                       {type}
                     </Text>

@@ -15,7 +15,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { fetchAll, executeWrite } from "../database/dbHelper";
-import { useColorScheme } from "nativewind";
+import { useColorScheme } from "react-native";
+import InteractiveCard from "../components/InteractiveCard";
 
 export default function CoursesScreen() {
   const [courses, setCourses] = useState([]);
@@ -23,7 +24,7 @@ export default function CoursesScreen() {
   const [editingCourse, setEditingCourse] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const { colorScheme } = useColorScheme();
+  const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
 
   // Form State
@@ -31,6 +32,23 @@ export default function CoursesScreen() {
   const [credits, setCredits] = useState("");
   const [lecturer, setLecturer] = useState("");
   const [semester, setSemester] = useState("");
+  const [maxAbsences, setMaxAbsences] = useState("3");
+
+  const updateAbsence = async (id, currentCount, max, increment) => {
+    let newCount = currentCount;
+    if (increment && currentCount < max) newCount++;
+    else if (!increment && currentCount > 0) newCount--;
+
+    if (newCount !== currentCount) {
+      await executeWrite("UPDATE courses SET absent_count = ? WHERE id = ?", [
+        newCount,
+        id,
+      ]);
+      setTimeout(() => {
+        loadCourses();
+      }, 100);
+    }
+  };
 
   const loadCourses = async () => {
     try {
@@ -55,6 +73,7 @@ export default function CoursesScreen() {
     setCredits("");
     setLecturer("");
     setSemester("");
+    setMaxAbsences("3");
     setModalVisible(true);
   };
 
@@ -64,6 +83,7 @@ export default function CoursesScreen() {
     setCredits(course.credits ? course.credits.toString() : "");
     setLecturer(course.lecturer_name || "");
     setSemester(course.semester ? course.semester.toString() : "");
+    setMaxAbsences(course.max_absences ? course.max_absences.toString() : "3");
     setModalVisible(true);
   };
 
@@ -77,29 +97,33 @@ export default function CoursesScreen() {
       if (editingCourse) {
         // Update
         await executeWrite(
-          "UPDATE courses SET course_name = ?, credits = ?, lecturer_name = ?, semester = ? WHERE id = ?",
+          "UPDATE courses SET course_name = ?, credits = ?, lecturer_name = ?, semester = ?, max_absences = ? WHERE id = ?",
           [
             courseName,
             parseInt(credits) || 0,
             lecturer,
             parseInt(semester) || 0,
+            parseInt(maxAbsences) || 3,
             editingCourse.id,
           ],
         );
       } else {
         // Insert
         await executeWrite(
-          "INSERT INTO courses (course_name, credits, lecturer_name, semester) VALUES (?, ?, ?, ?)",
+          "INSERT INTO courses (course_name, credits, lecturer_name, semester, max_absences) VALUES (?, ?, ?, ?, ?)",
           [
             courseName,
             parseInt(credits) || 0,
             lecturer,
             parseInt(semester) || 0,
+            parseInt(maxAbsences) || 3,
           ],
         );
       }
       setModalVisible(false);
-      loadCourses();
+      setTimeout(() => {
+        loadCourses();
+      }, 100);
     } catch (error) {
       console.error("Failed to save course:", error);
       Alert.alert("Error", "Gagal menyimpan mata kuliah");
@@ -117,19 +141,21 @@ export default function CoursesScreen() {
           style: "destructive",
           onPress: async () => {
             await executeWrite("DELETE FROM courses WHERE id = ?", [id]);
-            loadCourses();
+            setTimeout(() => {
+              loadCourses();
+            }, 100);
           },
         },
       ],
     );
   };
 
-  const renderCourseItem = ({ item }) => {
-    const bgColors = [
-      "bg-blue-100 dark:bg-blue-900/30",
-      "bg-purple-100 dark:bg-purple-900/30",
-      "bg-emerald-100 dark:bg-emerald-900/30",
-      "bg-orange-100 dark:bg-orange-900/30",
+  const renderCourseItem = useCallback(({ item }) => {
+    const iconStyle = [
+      { bgDark: "rgba(30, 58, 138, 0.3)", bgLight: "#dbeafe" }, // blue
+      { bgDark: "rgba(88, 28, 135, 0.3)", bgLight: "#f3e8ff" }, // purple
+      { bgDark: "rgba(6, 78, 59, 0.3)", bgLight: "#d1fae5" }, // emerald
+      { bgDark: "rgba(124, 45, 18, 0.3)", bgLight: "#ffedd5" }, // orange
     ];
     const colorHex = ["#3B82F6", "#A855F7", "#10B981", "#F97316"];
     const icons = [
@@ -141,148 +167,247 @@ export default function CoursesScreen() {
     const idx = (item.id || 0) % 4;
 
     return (
-      <View className="bg-white dark:bg-[#1E293B] rounded-3xl p-5 mb-4 shadow-sm border border-slate-100 dark:border-slate-800">
-        <View className="flex-row justify-between items-center mb-4">
-          <View
-            className={`${bgColors[idx]} w-12 h-12 rounded-xl items-center justify-center`}
-          >
-            <Ionicons
-              name={icons[idx]}
-              size={24}
-              color={isDark ? "#fff" : colorHex[idx]}
-            />
+      <View className="mb-4 px-5">
+        <InteractiveCard>
+          <View className="bg-white dark:bg-slate-800 rounded-[28px] p-5 shadow-sm shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700">
+            <View className="flex-row justify-between items-center mb-4">
+              <View
+                className="w-12 h-12 rounded-2xl items-center justify-center"
+                style={{
+                  backgroundColor: isDark
+                    ? iconStyle[idx].bgDark
+                    : iconStyle[idx].bgLight,
+                }}
+              >
+                <Ionicons
+                  name={icons[idx]}
+                  size={24}
+                  color={isDark ? colorHex[idx] : colorHex[idx]}
+                />
+              </View>
+              <View className="bg-slate-100 dark:bg-slate-700/50 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-600">
+                <Text className="text-slate-600 dark:text-slate-300 font-bold text-xs">
+                  {item.credits} SKS
+                </Text>
+              </View>
+            </View>
+
+            <Text className="text-xl font-bold font-serif text-slate-800 dark:text-white mb-4">
+              {item.course_name}
+            </Text>
+
+            <View className="flex-row items-center mb-2">
+              <View className="w-6 items-center">
+                <Ionicons name="person" size={14} color="#64748B" />
+              </View>
+              <Text className="text-slate-500 dark:text-slate-400 text-sm font-medium">
+                {item.lecturer_name || "Tanpa Dosen"}
+              </Text>
+            </View>
+            <View className="flex-row items-center mb-5">
+              <View className="w-6 items-center">
+                <Ionicons name="calendar" size={14} color="#64748B" />
+              </View>
+              <Text className="text-slate-500 dark:text-slate-400 text-sm font-medium">
+                Semester {item.semester}
+              </Text>
+            </View>
+
+            {/* Attendance Tracker Bar */}
+            <View className="mb-5 bg-slate-50 dark:bg-slate-700/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-600">
+              <View className="flex-row justify-between items-center mb-3">
+                <View>
+                  <Text className="text-slate-700 dark:text-slate-300 font-bold text-[13px] uppercase tracking-wider mb-1">
+                    Jatah Bolos
+                  </Text>
+                  <Text className="text-slate-500 dark:text-slate-400 text-xs">
+                    {(item.max_absences || 3) - (item.absent_count || 0)} sisa
+                    slot libur
+                  </Text>
+                </View>
+                <View className="flex-row items-center bg-white dark:bg-slate-800 rounded-full border border-slate-200 dark:border-slate-700 p-1 shadow-sm">
+                  <TouchableOpacity
+                    onPress={() =>
+                      updateAbsence(
+                        item.id,
+                        item.absent_count || 0,
+                        item.max_absences || 3,
+                        false,
+                      )
+                    }
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    className="w-8 h-8 rounded-full bg-slate-50 dark:bg-slate-700 items-center justify-center active:bg-slate-200 dark:active:bg-slate-600"
+                  >
+                    <Ionicons
+                      name="remove"
+                      size={16}
+                      color={isDark ? "#E2E8F0" : "#475569"}
+                    />
+                  </TouchableOpacity>
+                  <View className="mx-2 items-center min-w-[30px]">
+                    <Text className="text-lg font-bold text-slate-800 dark:text-white leading-none">
+                      {item.absent_count || 0}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() =>
+                      updateAbsence(
+                        item.id,
+                        item.absent_count || 0,
+                        item.max_absences || 3,
+                        true,
+                      )
+                    }
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    className="w-8 h-8 rounded-full bg-slate-50 dark:bg-slate-700 items-center justify-center active:bg-slate-200 dark:active:bg-slate-600"
+                  >
+                    <Ionicons
+                      name="add"
+                      size={16}
+                      color={isDark ? "#E2E8F0" : "#475569"}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Progress Bar Container */}
+              <View className="h-2 w-full bg-slate-200 dark:bg-slate-600/50 rounded-full overflow-hidden">
+                <View
+                  style={{
+                    width: `${Math.min(((item.absent_count || 0) / (item.max_absences || 3)) * 100, 100)}%`,
+                  }}
+                  className={`h-full rounded-full ${(item.absent_count || 0) >= (item.max_absences || 3) ? "bg-rose-500" : (item.absent_count || 0) >= (item.max_absences || 3) - 1 ? "bg-amber-400" : "bg-emerald-500"}`}
+                />
+              </View>
+            </View>
+
+            <View className="flex-row justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-700/50">
+              <TouchableOpacity
+                onPress={() => openEditModal(item)}
+                className="flex-1 bg-slate-50 dark:bg-slate-700/50 rounded-2xl py-3 flex-row items-center justify-center border border-slate-100 dark:border-slate-600"
+              >
+                <Ionicons
+                  name="pencil"
+                  size={16}
+                  color={isDark ? "#CBD5E1" : "#475569"}
+                />
+                <Text className="text-slate-600 dark:text-slate-300 font-bold ml-2 text-sm">
+                  Edit
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => confirmDelete(item.id)}
+                className="flex-1 bg-rose-50 dark:bg-rose-500/10 rounded-2xl py-3 flex-row items-center justify-center border border-rose-100 dark:border-rose-500/20"
+              >
+                <Ionicons name="trash" size={16} color="#F43F5E" />
+                <Text className="text-rose-500 font-bold ml-2 text-sm">
+                  Hapus
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
-          <View className="bg-slate-100 dark:bg-slate-700 px-3 py-1.5 rounded-lg">
-            <Text className="text-slate-600 dark:text-slate-300 font-bold text-xs">
-              {item.credits} SKS
-            </Text>
-          </View>
-        </View>
-
-        <Text className="text-xl font-bold text-slate-800 dark:text-white mb-3">
-          {item.course_name}
-        </Text>
-
-        <View className="flex-row items-center mb-2">
-          <Ionicons name="person-outline" size={16} color="#64748B" />
-          <Text className="text-slate-500 dark:text-slate-400 text-sm ml-2.5">
-            {item.lecturer_name || "Tanpa Dosen"}
-          </Text>
-        </View>
-        <View className="flex-row items-center mb-5">
-          <Ionicons name="calendar-outline" size={16} color="#64748B" />
-          <Text className="text-slate-500 dark:text-slate-400 text-sm ml-2.5">
-            Semester {item.semester}
-          </Text>
-        </View>
-
-        <View className="flex-row justify-between gap-3">
-          <TouchableOpacity
-            onPress={() => openEditModal(item)}
-            className="flex-1 bg-slate-50 dark:bg-slate-700/50 rounded-xl py-3 flex-row items-center justify-center border border-slate-100 dark:border-slate-600"
-          >
-            <Ionicons
-              name="pencil"
-              size={16}
-              color={isDark ? "#CBD5E1" : "#475569"}
-            />
-            <Text className="text-slate-700 dark:text-slate-300 font-medium ml-2 text-sm">
-              Edit
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => confirmDelete(item.id)}
-            className="flex-1 bg-rose-50 dark:bg-rose-900/20 rounded-xl py-3 flex-row items-center justify-center border border-rose-100 dark:border-rose-900/50"
-          >
-            <Ionicons name="trash-outline" size={16} color="#F43F5E" />
-            <Text className="text-rose-500 font-medium ml-2 text-sm">
-              Hapus
-            </Text>
-          </TouchableOpacity>
-        </View>
+        </InteractiveCard>
       </View>
     );
-  };
+  }, [isDark, openEditModal, confirmDelete, updateAbsence]);
 
-  return (
-    <SafeAreaView className="flex-1 bg-slate-50 dark:bg-[#0F172A]">
+  const renderHeader = () => (
+    <>
       {/* Header SmartStudy top */}
-      <View className="px-5 pt-4 pb-2 flex-row justify-between items-center mb-2">
+      <View className="px-6 pt-6 pb-2 flex-row justify-between items-center mb-2">
         <View className="flex-row items-center">
-          <Ionicons name="school" size={24} color="#3B82F6" />
-          <Text className="text-lg font-bold text-slate-800 dark:text-white ml-2">
+          <View className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/50 rounded-2xl items-center justify-center mr-3">
+            <Ionicons name="school" size={20} color="#4F46E5" />
+          </View>
+          <Text className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
             SmartStudy
           </Text>
         </View>
       </View>
 
-      <View className="px-5 mb-6 flex-row justify-between items-end">
+      <View className="px-5 mb-4 mt-2 flex-row justify-between items-end">
         <View className="flex-1 pr-2">
-          <Text className="text-3xl font-extrabold text-slate-800 dark:text-white mb-1">
-            Daftar Matkul
+          <Text className="text-sm font-semibold text-emerald-500 dark:text-emerald-400 mb-1 tracking-widest uppercase">
+            Kurikulum
+          </Text>
+          <Text className="text-3xl font-serif font-bold text-[#1a365d] dark:text-white mb-2 tracking-tight">
+            Mata Kuliah
           </Text>
           <Text className="text-slate-500 dark:text-slate-400 text-sm">
             Kelola daftar mata kuliah yang Anda ambil.
           </Text>
         </View>
-        <TouchableOpacity
-          onPress={openAddModal}
-          className="bg-blue-500 w-14 h-14 rounded-2xl items-center justify-center shadow-lg shadow-blue-500/30"
-        >
-          <Ionicons name="add" size={28} color="white" />
-        </TouchableOpacity>
+      </View>
+
+      <View className="px-5 mb-6">
+        <InteractiveCard onPress={openAddModal}>
+          <View className="bg-emerald-500 dark:bg-emerald-600 rounded-[20px] py-3 flex-row items-center justify-center shadow-md shadow-emerald-500/20">
+            <Ionicons name="add-circle" size={22} color="white" />
+            <Text className="text-white font-bold text-[15px] ml-2 tracking-wide">
+              Mata Kuliah Baru
+            </Text>
+          </View>
+        </InteractiveCard>
       </View>
 
       {/* Search Bar */}
-      <View className="px-5 mb-6">
-        <View className="bg-white dark:bg-[#1E293B] flex-row items-center px-4 py-3.5 rounded-2xl border border-slate-100 dark:border-slate-800">
-          <Ionicons name="search" size={20} color="#64748B" />
+      <View className="px-5 mb-4">
+        <View className="bg-white dark:bg-slate-800 flex-row items-center px-4 py-2 rounded-[16px] border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-200/50 dark:shadow-none">
+          <Ionicons name="search" size={18} color="#94A3B8" />
           <TextInput
-            className="flex-1 ml-3 text-slate-800 dark:text-white text-base"
+            className="flex-1 ml-2 text-slate-800 dark:text-white text-[14px] font-medium"
             placeholder="Cari mata kuliah..."
-            placeholderTextColor="#64748B"
+            placeholderTextColor="#94A3B8"
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
         </View>
       </View>
+    </>
+  );
 
-      {courses.length > 0 ? (
-        <FlatList
-          data={courses.filter((c) =>
-            c.course_name.toLowerCase().includes(searchQuery.toLowerCase()),
-          )}
-          keyExtractor={(item) => item.id.toString()}
-          renderItem={renderCourseItem}
-          contentContainerStyle={{
-            paddingHorizontal: 20,
-            paddingBottom: 100,
-          }}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
+  return (
+    <SafeAreaView
+      className="flex-1 bg-slate-50 dark:bg-[#0F172A]"
+      edges={["top"]}
+    >
+      <FlatList
+        data={courses.filter((c) =>
+          c.course_name.toLowerCase().includes(searchQuery.toLowerCase()),
+        )}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={renderCourseItem}
+        ListHeaderComponent={renderHeader}
+        contentContainerStyle={{
+          paddingBottom: 160,
+        }}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          courses.length > 0 ? (
             <View className="py-20 flex items-center justify-center">
               <Text className="text-slate-500 dark:text-slate-400">
                 Tidak ada hasil pencarian.
               </Text>
             </View>
-          }
-        />
-      ) : (
-        <View className="flex-1 px-5 flex items-center justify-center -mt-20">
-          <Ionicons
-            name="library-outline"
-            size={80}
-            color={isDark ? "#334155" : "#CBD5E1"}
-            className="mb-4"
-          />
-          <Text className="text-slate-800 dark:text-white text-lg font-bold">
-            Data Kosong
-          </Text>
-          <Text className="text-slate-500 dark:text-slate-400 text-center mt-2 max-w-[250px]">
-            Ketuk tombol + di atas untuk menambahkan mata kuliah pertama Anda.
-          </Text>
-        </View>
-      )}
+          ) : (
+            <View className="py-20 flex items-center justify-center">
+              <Ionicons
+                name="library-outline"
+                size={80}
+                color={isDark ? "#334155" : "#CBD5E1"}
+                className="mb-4"
+              />
+              <Text className="text-slate-800 dark:text-white text-lg font-bold">
+                Data Kosong
+              </Text>
+              <Text className="text-slate-500 dark:text-slate-400 text-center mt-2 max-w-[250px]">
+                Ketuk tombol + di atas untuk menambahkan mata kuliah pertama
+                Anda.
+              </Text>
+            </View>
+          )
+        }
+      />
 
       {/* Modal Add/Edit */}
       <Modal visible={isModalVisible} animationType="slide" transparent={true}>
@@ -355,11 +480,22 @@ export default function CoursesScreen() {
                 Nama Dosen
               </Text>
               <TextInput
-                className="bg-slate-50 dark:bg-[#1E293B] border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-4 text-slate-800 dark:text-white mb-8"
+                className="bg-slate-50 dark:bg-[#1E293B] border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-4 text-slate-800 dark:text-white mb-6"
                 placeholder="Contoh: Budi Santoso, M.Kom"
                 placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
                 value={lecturer}
                 onChangeText={setLecturer}
+              />
+              <Text className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                Batas Jatah Bolos (Max Absen)
+              </Text>
+              <TextInput
+                className="bg-slate-50 dark:bg-[#1E293B] border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-4 text-slate-800 dark:text-white mb-8"
+                placeholder="Contoh: 3"
+                placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                keyboardType="numeric"
+                value={maxAbsences}
+                onChangeText={setMaxAbsences}
               />
               <TouchableOpacity
                 onPress={saveCourse}

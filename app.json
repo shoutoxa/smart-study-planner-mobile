@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "smart_study_planner_mobile",
+    "name": "Smart Study",
     "slug": "smart_study_planner_mobile",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -29,7 +29,25 @@
     "plugins": [
       "expo-sqlite",
       "expo-asset",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "ScheduleWidget",
+              "label": "Jadwal Kuliah Smart Planner",
+              "description": "Tampilkan jadwal kuliah hari ini secara instan.",
+              "minWidth": "300dp",
+              "minHeight": "250dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 4,
+              "resizeMode": "horizontal|vertical",
+              "updatePeriodMillis": 1800000
+            }
+          ]
+        }
+      ]
     ],
     "extra": {
       "eas": {

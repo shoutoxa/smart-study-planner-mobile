@@ -4,9 +4,17 @@ let db = null;
 
 // Initialize Database Concept
 export const openDatabase = async () => {
-  if (db) return db;
-  db = await SQLite.openDatabaseAsync("smart_study_planner.db");
-  return db;
+  try {
+    if (db !== null) {
+      return db;
+    }
+    db = await SQLite.openDatabaseAsync("smart_study_planner.db");
+    return db;
+  } catch (error) {
+    console.warn("Re-initializing DB due to null reference:", error);
+    db = await SQLite.openDatabaseAsync("smart_study_planner.db");
+    return db;
+  }
 };
 
 // Initialize Tables
@@ -23,7 +31,9 @@ export const initDatabase = async () => {
         course_name TEXT NOT NULL,
         credits INTEGER DEFAULT 0,
         lecturer_name TEXT,
-        semester INTEGER
+        semester INTEGER,
+        absent_count INTEGER DEFAULT 0,
+        max_absences INTEGER DEFAULT 3
       );
 
       CREATE TABLE IF NOT EXISTS study_plans (
@@ -70,6 +80,23 @@ export const initDatabase = async () => {
         FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
       );
     `);
+
+    // Migrasi bagi database lama yang belum memiliki kolom absensi
+    try {
+      await database.execAsync(`
+        ALTER TABLE courses ADD COLUMN absent_count INTEGER DEFAULT 0;
+      `);
+    } catch (_e) {
+      // Abaikan bila kolom sudah ada
+    }
+
+    try {
+      await database.execAsync(`
+        ALTER TABLE courses ADD COLUMN max_absences INTEGER DEFAULT 3;
+      `);
+    } catch (_e) {
+      // Abaikan bila kolom sudah ada
+    }
 
     console.log("Database initialized successfully.");
   } catch (error) {
