@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -25,10 +26,10 @@ export default function NotesScreen() {
   const [editingNote, setEditingNote] = useState(null);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const [refreshing, setRefreshing] = useState(false);
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState("");
-  const filterChips = ["Semua", "Semester 6", "Tugas Akhir", "Umum"];
   const [activeChip, setActiveChip] = useState("Semua");
 
   // Form State
@@ -54,6 +55,20 @@ export default function NotesScreen() {
       console.error("Failed to load notes:", error);
     }
   };
+
+  // Build dynamic filter chips from course data
+  const filterChips = ["Semua", "Umum", ...courses.map((c) => c.course_name)];
+
+  // Filtered notes based on search + active chip
+  const filteredNotes = notes.filter((n) => {
+    const matchesSearch = n.title
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    if (activeChip === "Semua") return true;
+    if (activeChip === "Umum") return !n.course_id;
+    return n.course_name === activeChip;
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -91,14 +106,12 @@ export default function NotesScreen() {
         );
       } else {
         await executeWrite(
-          "INSERT INTO course_notes (course_id, title, content) VALUES (?, ?, ?)",
-          [courseId || null, title, content],
+          "INSERT INTO course_notes (course_id, title, content, created_at) VALUES (?, ?, ?, ?)",
+          [courseId || null, title, content, new Date().toISOString()],
         );
       }
       setModalVisible(false);
-      setTimeout(() => {
-        loadData();
-      }, 100);
+      await loadData();
     } catch (error) {
       console.error("Failed to save note:", error);
       Alert.alert("Error", "Gagal menyimpan catatan");
@@ -112,20 +125,43 @@ export default function NotesScreen() {
         text: "Hapus",
         style: "destructive",
         onPress: async () => {
-          await executeWrite("DELETE FROM course_notes WHERE id = ?", [id]);
-          setTimeout(() => {
-            loadData();
-          }, 100);
+          try {
+            await executeWrite("DELETE FROM course_notes WHERE id = ?", [id]);
+            await loadData();
+          } catch (error) {
+            console.error("Failed to delete note:", error);
+            Alert.alert("Error", "Gagal menghapus catatan.");
+          }
         },
       },
     ]);
   };
 
-  // Mock function to determine if a note is "Pinned" just for UI presentation (the first item)
-  const isPinned = (index) => index === 0 && notes.length > 2;
+  // Format relative time from ISO string or SQLite timestamp
+  const getRelativeTime = (dateStr) => {
+    if (!dateStr) return "";
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return "";
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 1) return "Baru saja";
+    if (diffMins < 60) return `${diffMins} menit lalu`;
+    if (diffHours < 24) return `${diffHours} jam lalu`;
+    if (diffDays === 1) return "Kemarin";
+    if (diffDays < 7) return `${diffDays} hari lalu`;
+    // Fallback: show formatted date
+    return date.toLocaleDateString("id-ID", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  };
 
   const renderNoteItem = useCallback(({ item, index }) => {
-    const pinned = isPinned(index);
 
     // Assign random nice colors for the icon bg based on ID so it stays consistent
     const bgHex = [
@@ -144,7 +180,7 @@ export default function NotesScreen() {
     ];
     const idx = item.id % 5;
 
-    if (pinned) {
+    if (index === 0 && filteredNotes.length > 2) {
       return (
         <View className="mb-6 px-5">
           <InteractiveCard onPress={() => openEditModal(item)}>
@@ -154,10 +190,10 @@ export default function NotesScreen() {
               </View>
               <View className="flex-row justify-between mb-4 mt-2">
                 <Text className="text-emerald-100 bg-emerald-500/50 px-3 py-1.5 rounded-full text-[11px] font-bold tracking-widest uppercase">
-                  Penting
+                  Terbaru
                 </Text>
                 <Text className="text-emerald-100/80 text-[11px] font-semibold mt-1">
-                  Baru saja
+                  {getRelativeTime(item.created_at)}
                 </Text>
               </View>
               <Text className="text-white text-2xl font-bold font-serif mb-3 leading-snug">
@@ -223,22 +259,14 @@ export default function NotesScreen() {
                 color={isDark ? "#64748B" : "#94A3B8"}
               />
               <Text className="text-slate-500 dark:text-slate-500 text-xs ml-1.5 font-bold mr-4">
-                Hari ini
-              </Text>
-              <Ionicons
-                name="document-text"
-                size={14}
-                color={isDark ? "#64748B" : "#94A3B8"}
-              />
-              <Text className="text-slate-500 dark:text-slate-500 text-xs ml-1.5 font-bold">
-                0 Files
+                {getRelativeTime(item.created_at) || "—"}
               </Text>
             </View>
           </View>
         </InteractiveCard>
       </View>
     );
-  }, [isDark, confirmDelete, openEditModal, notes.length]);
+  }, [isDark, filteredNotes.length]);
 
   const renderHeader = () => (
     <>
@@ -344,12 +372,20 @@ export default function NotesScreen() {
     >
       {/* Notes List */}
       <FlatList
-        data={notes.filter((n) =>
-          n.title.toLowerCase().includes(searchQuery.toLowerCase()),
-        )}
+        data={filteredNotes}
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderNoteItem}
         ListHeaderComponent={renderHeader}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadData().then(() => setRefreshing(false));
+            }}
+            tintColor={isDark ? "#cbd5e1" : "#475569"}
+          />
+        }
         contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={

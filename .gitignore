@@ -39,3 +39,12 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# sensitive credential files
+credentials.json
+*.keystore
+release.keystore
+
+# lint output files
+lint_results.json
+lint_results.txt

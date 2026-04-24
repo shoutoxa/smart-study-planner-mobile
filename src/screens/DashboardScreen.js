@@ -11,11 +11,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { fetchAll } from "../database/dbHelper";
-import { useColorScheme, Appearance } from "react-native";
+import { useColorScheme, Appearance, Dimensions } from "react-native";
 import InteractiveCard from "../components/InteractiveCard";
+import { ProgressChart } from "react-native-chart-kit";
+
+const screenWidth = Dimensions.get("window").width;
 
 export default function DashboardScreen({ navigation }) {
-  const [stats, setStats] = useState({ courses: 0, activeTasks: 0 });
+  const [stats, setStats] = useState({ courses: 0, activeTasks: 0, completedTasks: 0, totalTasks: 0 });
   const [recentTasks, setRecentTasks] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const colorScheme = useColorScheme();
@@ -29,6 +32,12 @@ export default function DashboardScreen({ navigation }) {
       const tasksData = await fetchAll(
         "SELECT COUNT(*) as count FROM tasks WHERE status != 'Selesai'",
       );
+      const completedTasksData = await fetchAll(
+        "SELECT COUNT(*) as count FROM tasks WHERE status = 'Selesai'",
+      );
+      const allTasksData = await fetchAll(
+        "SELECT COUNT(*) as count FROM tasks",
+      );
 
       const recentTasksData = await fetchAll(
         "SELECT t.*, c.course_name FROM tasks t LEFT JOIN courses c ON t.course_id = c.id WHERE t.status != 'Selesai' ORDER BY t.deadline ASC LIMIT 3",
@@ -37,6 +46,8 @@ export default function DashboardScreen({ navigation }) {
       setStats({
         courses: coursesData[0]?.count || 0,
         activeTasks: tasksData[0]?.count || 0,
+        completedTasks: completedTasksData[0]?.count || 0,
+        totalTasks: allTasksData[0]?.count || 0,
       });
       setRecentTasks(recentTasksData);
     } catch (error) {
@@ -69,17 +80,26 @@ export default function DashboardScreen({ navigation }) {
             SmartStudy
           </Text>
         </View>
-        <TouchableOpacity
-          onPress={() => Appearance.setColorScheme(isDark ? "light" : "dark")}
-          activeOpacity={0.7}
-          className="w-11 h-11 bg-white dark:bg-slate-800 rounded-full items-center justify-center shadow-sm border border-slate-100 dark:border-slate-700"
-        >
-          <Ionicons
-            name={isDark ? "sunny" : "moon"}
-            size={22}
-            color={isDark ? "#FBBF24" : "#64748B"}
-          />
-        </TouchableOpacity>
+        <View className="flex-row items-center gap-x-2">
+          <TouchableOpacity
+            onPress={() => navigation.navigate("Settings")}
+            activeOpacity={0.7}
+            className="w-11 h-11 bg-white dark:bg-slate-800 rounded-full items-center justify-center shadow-sm border border-slate-100 dark:border-slate-700"
+          >
+            <Ionicons name="settings" size={22} color={isDark ? "#cbd5e1" : "#475569"} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => Appearance.setColorScheme(isDark ? "light" : "dark")}
+            activeOpacity={0.7}
+            className="w-11 h-11 bg-white dark:bg-slate-800 rounded-full items-center justify-center shadow-sm border border-slate-100 dark:border-slate-700"
+          >
+            <Ionicons
+              name={isDark ? "sunny" : "moon"}
+              size={22}
+              color={isDark ? "#FBBF24" : "#64748B"}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -108,14 +128,14 @@ export default function DashboardScreen({ navigation }) {
         {/* Edu.diksi styled Bento Main Card */}
         <View className="mb-6">
           <InteractiveCard scaleTo={0.98}>
-            <View className="bg-[#1e293b] dark:bg-[#1a365d] rounded-[32px] p-6 shadow-md shadow-indigo-500/10 overflow-hidden border border-slate-700 dark:border-slate-600/50">
+            <View className="bg-indigo-600 dark:bg-[#1a365d] rounded-[32px] p-6 shadow-md shadow-indigo-500/10 overflow-hidden border border-indigo-500 dark:border-slate-600/50">
               {/* Background design elements */}
-              <View className="absolute -right-6 -top-6 w-32 h-32 bg-indigo-500/20 rounded-full" />
-              <View className="absolute -left-6 -bottom-6 w-24 h-24 bg-emerald-500/20 rounded-full" />
+              <View className="absolute -right-6 -top-6 w-32 h-32 bg-indigo-400/20 rounded-full" />
+              <View className="absolute -left-6 -bottom-6 w-24 h-24 bg-emerald-400/20 rounded-full" />
 
               <View className="flex-row justify-between items-start mb-6 z-10">
                 <View>
-                  <Text className="text-slate-300 text-xs font-bold tracking-wider mb-1">
+                  <Text className="text-indigo-200 dark:text-slate-300 text-xs font-bold tracking-wider mb-1">
                     STATUS AKADEMIK
                   </Text>
                   <Text className="text-white text-3xl font-serif font-bold tracking-tight">
@@ -123,14 +143,14 @@ export default function DashboardScreen({ navigation }) {
                   </Text>
                 </View>
                 <View className="bg-emerald-500/20 px-3 py-1.5 rounded-full border border-emerald-500/30">
-                  <Text className="text-emerald-400 text-xs font-bold">
+                  <Text className="text-emerald-300 dark:text-emerald-400 text-xs font-bold">
                     Semester Ini
                   </Text>
                 </View>
               </View>
 
               <View className="flex-row items-center bg-white/10 p-4 rounded-2xl border border-white/5 z-10">
-                <View className="w-12 h-12 bg-indigo-500/30 rounded-xl items-center justify-center mr-4">
+                <View className="w-12 h-12 bg-indigo-400/30 rounded-xl items-center justify-center mr-4">
                   <Ionicons name="flame" size={24} color="#FBBF24" />
                 </View>
                 <View>
@@ -145,6 +165,34 @@ export default function DashboardScreen({ navigation }) {
             </View>
           </InteractiveCard>
         </View>
+
+        {/* Chart Section */}
+        {stats.totalTasks > 0 && (
+          <View className="mb-6 bg-white dark:bg-slate-800 rounded-[32px] p-6 shadow-sm border border-slate-100 dark:border-slate-700 items-center justify-center">
+            <Text className="text-slate-800 dark:text-white font-bold text-lg mb-2">
+              Penyelesaian Tugas
+            </Text>
+            <ProgressChart
+              data={{
+                labels: ["Selesai"],
+                data: [stats.completedTasks / stats.totalTasks]
+              }}
+              width={screenWidth - 80}
+              height={140}
+              strokeWidth={16}
+              radius={48}
+              chartConfig={{
+                backgroundColor: "transparent",
+                backgroundGradientFrom: isDark ? "#1e293b" : "#ffffff",
+                backgroundGradientTo: isDark ? "#1e293b" : "#ffffff",
+                color: (opacity = 1) => `rgba(16, 185, 129, ${opacity})`, // emerald-500
+                labelColor: (opacity = 1) => isDark ? `rgba(255, 255, 255, ${opacity})` : `rgba(30, 41, 59, ${opacity})`,
+              }}
+              hideLegend={false}
+              style={{ borderRadius: 16 }}
+            />
+          </View>
+        )}
 
         {/* Statistics Grid */}
         <View className="flex-row justify-between mb-8">

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -10,11 +10,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { fetchAll, executeWrite } from "../database/dbHelper";
+import { fetchAll, executeWrite, getSetting } from "../database/dbHelper";
 import { useColorScheme } from "react-native";
 import DateTimePicker, {
   DateTimePickerAndroid,
@@ -27,12 +28,36 @@ export default function TasksScreen() {
   const [courses, setCourses] = useState([]);
   const [isModalVisible, setModalVisible] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Stats Calculated on the fly (react-best-practices: rerender-derived-state)
-  const totalTasks = tasks.length;
-  const selesaiTasks = tasks.filter((t) => t.status === "Selesai").length;
-  const belumTasks = totalTasks - selesaiTasks;
-  const terlewatTasks = 0; // Simple mock for testing
+  // Parse deadline string "DD/MM/YYYY HH:mm" into a Date object
+  const parseDeadline = (deadlineStr) => {
+    if (!deadlineStr) return null;
+    const parts = deadlineStr.split(" ");
+    if (parts.length !== 2) return null;
+    const [d, m, y] = parts[0].split("/");
+    const [h, min] = parts[1].split(":");
+    if (!d || !m || !y || !h || !min) return null;
+    return new Date(+y, +m - 1, +d, +h, +min);
+  };
+
+  // Stats — recalculate with fresh `now` each time tasks change
+  const { totalTasks, selesaiTasks, terlewatTasks, belumTasks } = useMemo(() => {
+    const now = new Date();
+    const total = tasks.length;
+    const selesai = tasks.filter((t) => t.status === "Selesai").length;
+    const terlewat = tasks.filter((t) => {
+      if (t.status === "Selesai" || !t.deadline) return false;
+      const deadlineDate = parseDeadline(t.deadline);
+      return deadlineDate && deadlineDate < now;
+    }).length;
+    return {
+      totalTasks: total,
+      selesaiTasks: selesai,
+      terlewatTasks: terlewat,
+      belumTasks: total - selesai - terlewat,
+    };
+  }, [tasks]);
 
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
@@ -53,7 +78,7 @@ export default function TasksScreen() {
         SELECT t.*, c.course_name 
         FROM tasks t 
         LEFT JOIN courses c ON t.course_id = c.id 
-        ORDER BY t.status DESC, t.deadline ASC
+        ORDER BY CASE WHEN t.status = 'Selesai' THEN 1 ELSE 0 END ASC, t.deadline ASC
       `;
 
       const tasksData = await fetchAll(query);
@@ -73,6 +98,9 @@ export default function TasksScreen() {
 
   const syncNotifications = async (tasksData) => {
     try {
+      const offsetStr = await getSetting("notify_offset_hours", "24");
+      const offsetHours = parseInt(offsetStr, 10) || 24;
+
       await Notifications.cancelAllScheduledNotificationsAsync();
 
       for (const t of tasksData) {
@@ -92,36 +120,28 @@ export default function TasksScreen() {
 
               const now = new Date();
 
-              const notifyTime1H = new Date(
-                taskDate.getTime() - 60 * 60 * 1000,
+              const notifyTime = new Date(
+                taskDate.getTime() - offsetHours * 60 * 60 * 1000,
               );
-              if (notifyTime1H > now) {
-                await Notifications.scheduleNotificationAsync({
-                  content: {
-                    title: "⏰ Pengingat Deadline",
-                    body: `${t.task_name} harus segera diselesaikan dalam 1 jam!`,
-                    sound: true,
-                  },
-                  trigger: {
-                    type: Notifications.SchedulableTriggerInputTypes.DATE,
-                    date: notifyTime1H,
-                  },
-                });
-              }
+              
+              if (notifyTime > now) {
+                let notifTitle = "⏰ Pengingat Tugas";
+                let notifBody = `${t.task_name} harus diselesaikan dalam ${offsetHours} jam!`;
 
-              const notifyTime24H = new Date(
-                taskDate.getTime() - 24 * 60 * 60 * 1000,
-              );
-              if (notifyTime24H > now) {
+                if (offsetHours === 24) {
+                  notifTitle = "📅 Pengingat H-1 Tugas";
+                  notifBody = `Jangan lupa kerjakan tugas: ${t.task_name}`;
+                }
+
                 await Notifications.scheduleNotificationAsync({
                   content: {
-                    title: "📅 Pengingat H-1 Tugas",
-                    body: `Jangan lupa kerjakan tugas: ${t.task_name}`,
+                    title: notifTitle,
+                    body: notifBody,
                     sound: true,
                   },
                   trigger: {
                     type: Notifications.SchedulableTriggerInputTypes.DATE,
-                    date: notifyTime24H,
+                    date: notifyTime,
                   },
                 });
               }
@@ -137,7 +157,7 @@ export default function TasksScreen() {
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [loadData]),
+    }, []),
   );
 
   const toggleTaskStatus = async (task) => {
@@ -148,8 +168,7 @@ export default function TasksScreen() {
         newStatus,
         task.id,
       ]);
-      // Beri waktu SQLite melepas lock sebelum membaca ulang
-      setTimeout(() => loadData(), 100);
+      await loadData();
     } catch (error) {
       console.error("Failed to update status:", error);
     }
@@ -162,8 +181,13 @@ export default function TasksScreen() {
         text: "Hapus",
         style: "destructive",
         onPress: async () => {
-          await executeWrite("DELETE FROM tasks WHERE id = ?", [id]);
-          setTimeout(() => loadData(), 100);
+          try {
+            await executeWrite("DELETE FROM tasks WHERE id = ?", [id]);
+            await loadData();
+          } catch (error) {
+            console.error("Failed to delete task:", error);
+            Alert.alert("Error", "Gagal menghapus tugas.");
+          }
         },
       },
     ]);
@@ -179,6 +203,22 @@ export default function TasksScreen() {
     setModalVisible(true);
   };
 
+  const openEditModal = (task) => {
+    setEditingTask(task);
+    setTaskName(task.task_name || "");
+    setCourseId(task.course_id || "");
+    setDeadline(task.deadline || "");
+    setPriority(task.priority || "Sedang");
+    // Parse existing deadline into dateObj for the picker
+    if (task.deadline) {
+      const parsed = parseDeadline(task.deadline);
+      setDateObj(parsed || new Date());
+    } else {
+      setDateObj(new Date());
+    }
+    setModalVisible(true);
+  };
+
   const formatDate = (date) => {
     const d = new Date(date);
     const day = d.getDate().toString().padStart(2, "0");
@@ -190,15 +230,20 @@ export default function TasksScreen() {
   };
 
   const onDateChange = (event, selectedDate) => {
-    // Handling seragam utk pengingkaran picker
-    if (Platform.OS === "ios") {
-      setShowPicker(false);
+    if (Platform.OS === "android") {
+      // Android: picker otomatis ditutup setelah "set" atau "dismissed"
+      // Tidak perlu setShowPicker(false) karena Android pakai DateTimePickerAndroid.open()
+    } else if (Platform.OS === "ios") {
+      // iOS: hanya tutup picker jika user dismiss (bukan saat memilih)
+      if (event.type === "dismissed") {
+        setShowPicker(false);
+        return;
+      }
     }
 
-    // Tipe "set" menandakan pengguna menekan OK
-    if (event.type === "set" && selectedDate) {
+    // Update value saat user memilih
+    if (selectedDate) {
       setDateObj(selectedDate);
-      // Format 24 Jam khusus tugas:
       setDeadline(formatDate(selectedDate));
     }
   };
@@ -255,8 +300,7 @@ export default function TasksScreen() {
         );
       }
       setModalVisible(false);
-      // Beri napas bagi SQLite sebelum merekam tabel kembali
-      setTimeout(() => loadData(), 100);
+      await loadData();
     } catch (error) {
       console.error("Failed to save task:", error);
       Alert.alert("Error", "Gagal menyimpan tugas");
@@ -288,7 +332,7 @@ export default function TasksScreen() {
 
     return (
       <View className="mb-4">
-        <InteractiveCard>
+        <InteractiveCard onPress={() => openEditModal(item)}>
           <View className="bg-white dark:bg-slate-800 rounded-[28px] p-5 shadow-sm shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex-row">
             <TouchableOpacity
               onPress={() => toggleTaskStatus(item)}
@@ -377,7 +421,7 @@ export default function TasksScreen() {
         </InteractiveCard>
       </View>
     );
-  }, [isDark, confirmDelete, toggleTaskStatus]);
+  }, [isDark, tasks]);
 
   return (
     <SafeAreaView className="flex-1 bg-slate-50 dark:bg-[#0F172A]">
@@ -397,6 +441,16 @@ export default function TasksScreen() {
         data={tasks}
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderTaskItem}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadData().then(() => setRefreshing(false));
+            }}
+            tintColor={isDark ? "#cbd5e1" : "#475569"}
+          />
+        }
         contentContainerStyle={{
           paddingHorizontal: 20,
           paddingTop: 10,
@@ -509,23 +563,16 @@ export default function TasksScreen() {
             </View>
           </>
         }
-        ListFooterComponent={
-          tasks.length > 0 ? (
-            <TouchableOpacity className="mt-6 mb-10 py-3 items-center">
-              <Text className="text-blue-500 font-medium text-sm">
-                Lihat Semua Tugas
-              </Text>
-            </TouchableOpacity>
-          ) : null
-        }
+        ListFooterComponent={null}
         ListEmptyComponent={
           <View className="py-20 flex items-center justify-center">
-            <Ionicons
-              name="checkbox-outline"
-              size={60}
-              color={isDark ? "#334155" : "#CBD5E1"}
-              className="mb-4"
-            />
+            <View className="mb-4">
+              <Ionicons
+                name="checkbox-outline"
+                size={60}
+                color={isDark ? "#334155" : "#CBD5E1"}
+              />
+            </View>
             <Text className="text-slate-500 dark:text-slate-400 font-medium">
               Yeay, Belum ada tugas!
             </Text>
@@ -684,12 +731,20 @@ export default function TasksScreen() {
 
               {/* KHUSUS iOS: Munculkan Komponen di dalam Render JSX */}
               {Platform.OS === "ios" && showPicker && (
-                <DateTimePicker
-                  value={dateObj || new Date()}
-                  mode="datetime"
-                  display="default"
-                  onChange={onDateChange}
-                />
+                <>
+                  <DateTimePicker
+                    value={dateObj || new Date()}
+                    mode="datetime"
+                    display="spinner"
+                    onChange={onDateChange}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowPicker(false)}
+                    className="bg-blue-500 rounded-xl py-2 items-center mb-4"
+                  >
+                    <Text className="text-white font-bold text-sm">Konfirmasi Waktu</Text>
+                  </TouchableOpacity>
+                </>
               )}
 
               <Text className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">

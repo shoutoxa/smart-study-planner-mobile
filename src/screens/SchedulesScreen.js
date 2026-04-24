@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,6 +27,7 @@ export default function SchedulesScreen() {
 
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const [refreshing, setRefreshing] = useState(false);
 
   const daysOfWeek = [
     "Senin",
@@ -95,7 +97,7 @@ export default function SchedulesScreen() {
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [loadData]),
+    }, []),
   );
 
   const parseTimeStr = (timeStr) => {
@@ -185,9 +187,7 @@ export default function SchedulesScreen() {
         );
       }
       setModalVisible(false);
-      setTimeout(() => {
-        loadData();
-      }, 100);
+      await loadData();
     } catch (error) {
       console.error("Failed to save schedule:", error);
       Alert.alert("Error", "Gagal menyimpan jadwal");
@@ -201,10 +201,13 @@ export default function SchedulesScreen() {
         text: "Hapus",
         style: "destructive",
         onPress: async () => {
-          await executeWrite("DELETE FROM class_schedules WHERE id = ?", [id]);
-          setTimeout(() => {
-            loadData();
-          }, 100);
+          try {
+            await executeWrite("DELETE FROM class_schedules WHERE id = ?", [id]);
+            await loadData();
+          } catch (error) {
+            console.error("Failed to delete schedule:", error);
+            Alert.alert("Error", "Gagal menghapus jadwal.");
+          }
         },
       },
     ]);
@@ -315,7 +318,20 @@ export default function SchedulesScreen() {
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} className="pt-2">
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        className="pt-2"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadData().then(() => setRefreshing(false));
+            }}
+            tintColor={isDark ? "#cbd5e1" : "#475569"}
+          />
+        }
+      >
         {/* Title and Add Button */}
         <View className="px-5 mb-5 mt-4 flex-row justify-between items-end">
           <View className="flex-1 pr-2">
@@ -348,12 +364,13 @@ export default function SchedulesScreen() {
             renderGroupedSchedules()
           ) : (
             <View className="flex-1 items-center justify-center py-20 mt-10">
-              <Ionicons
-                name="calendar-outline"
-                size={80}
-                color={isDark ? "#334155" : "#CBD5E1"}
-                className="mb-4"
-              />
+              <View className="mb-4">
+                <Ionicons
+                  name="calendar-outline"
+                  size={80}
+                  color={isDark ? "#334155" : "#CBD5E1"}
+                />
+              </View>
               <Text className="text-slate-800 dark:text-white text-lg font-bold pb-1">
                 Belum Ada Jadwal
               </Text>

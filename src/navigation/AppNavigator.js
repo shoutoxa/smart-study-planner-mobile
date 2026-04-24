@@ -11,49 +11,56 @@ import CoursesScreen from "../screens/CoursesScreen";
 import TasksScreen from "../screens/TasksScreen";
 import SchedulesScreen from "../screens/SchedulesScreen";
 import NotesScreen from "../screens/NotesScreen";
+import SettingsScreen from "../screens/SettingsScreen";
+
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-const CustomTabBarButton = ({ children, onPress }) => (
-  <TouchableOpacity
-    style={{
-      top: -20,
-      justifyContent: "center",
-      alignItems: "center",
-      shadowColor: "#3b82f6",
-      shadowOpacity: 0.3,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 5 },
-    }}
-    onPress={onPress}
-  >
-    <View
+const CustomTabBarButton = ({ children, onPress }) => {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === "dark";
+
+  return (
+    <TouchableOpacity
       style={{
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        backgroundColor: "#6366f1", // indigo-500
+        top: -20,
         justifyContent: "center",
         alignItems: "center",
-        borderWidth: 4,
-        borderColor: "#f8fafc", // slate-50
+        shadowColor: "#3b82f6",
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 5 },
       }}
+      onPress={onPress}
     >
-      {children}
-    </View>
-    <Text
-      style={{
-        fontSize: 10,
-        color: "#6366f1",
-        fontWeight: "bold",
-        marginTop: 4,
-      }}
-    >
-      Catatan
-    </Text>
-  </TouchableOpacity>
-);
+      <View
+        style={{
+          width: 60,
+          height: 60,
+          borderRadius: 30,
+          backgroundColor: "#6366f1", // indigo-500
+          justifyContent: "center",
+          alignItems: "center",
+          borderWidth: 4,
+          borderColor: isDark ? "#1E293B" : "#f8fafc",
+        }}
+      >
+        {children}
+      </View>
+      <Text
+        style={{
+          fontSize: 10,
+          color: "#6366f1",
+          fontWeight: "bold",
+          marginTop: 4,
+        }}
+      >
+        Catatan
+      </Text>
+    </TouchableOpacity>
+  );
+};
 
 // Tab Navigator for main screens
 function BottomTabNavigator() {
@@ -139,6 +146,7 @@ export default function AppNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Main" component={BottomTabNavigator} />
+      <Stack.Screen name="Settings" component={SettingsScreen} />
     </Stack.Navigator>
   );
 }

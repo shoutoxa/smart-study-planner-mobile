@@ -21,7 +21,7 @@ export async function widgetTaskHandler(props) {
       SELECT cs.*, c.course_name, c.lecturer_name 
       FROM class_schedules cs 
       JOIN courses c ON cs.course_id = c.id 
-      WHERE cs.day_of_week = ?
+      WHERE cs.day_of_week = ? AND cs.is_active = 1
       ORDER BY cs.start_time ASC
     `;
 

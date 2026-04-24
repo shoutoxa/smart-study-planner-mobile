@@ -2,18 +2,55 @@ import * as SQLite from "expo-sqlite";
 
 let db = null;
 
-// Initialize Database Concept
+// Initialize Database Connection
 export const openDatabase = async () => {
   try {
     if (db !== null) {
-      return db;
+      // Verify the connection is still alive by running a quick query
+      try {
+        await db.getFirstAsync("SELECT 1");
+        return db;
+      } catch (_e) {
+        // Connection is stale, reset and re-open
+        console.warn("Stale DB connection detected, re-opening...");
+        db = null;
+      }
     }
     db = await SQLite.openDatabaseAsync("smart_study_planner.db");
     return db;
   } catch (error) {
-    console.warn("Re-initializing DB due to null reference:", error);
-    db = await SQLite.openDatabaseAsync("smart_study_planner.db");
-    return db;
+    console.warn("Re-initializing DB due to error:", error);
+    db = null; // Reset stale reference before retry
+    try {
+      db = await SQLite.openDatabaseAsync("smart_study_planner.db");
+      return db;
+    } catch (retryError) {
+      console.error("Database re-initialization also failed:", retryError);
+      db = null;
+      throw retryError; // Propagate so callers can handle it
+    }
+  }
+};
+
+// Close the current database connection (needed for import/export)
+export const closeDatabase = async () => {
+  if (db !== null) {
+    try {
+      await db.closeAsync();
+    } catch (e) {
+      console.warn("Error closing database:", e);
+    }
+    db = null;
+  }
+};
+
+// Flush WAL journal to the main .db file (needed before export)
+export const checkpointDatabase = async () => {
+  try {
+    const database = await openDatabase();
+    await database.execAsync("PRAGMA wal_checkpoint(FULL);");
+  } catch (error) {
+    console.warn("Checkpoint failed:", error);
   }
 };
 
@@ -79,6 +116,11 @@ export const initDatabase = async () => {
         content TEXT,
         FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
       );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        id TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
 
     // Migrasi bagi database lama yang belum memiliki kolom absensi
@@ -93,6 +135,15 @@ export const initDatabase = async () => {
     try {
       await database.execAsync(`
         ALTER TABLE courses ADD COLUMN max_absences INTEGER DEFAULT 3;
+      `);
+    } catch (_e) {
+      // Abaikan bila kolom sudah ada
+    }
+
+    // Migrasi: Tambahkan kolom created_at pada catatan
+    try {
+      await database.execAsync(`
+        ALTER TABLE course_notes ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP;
       `);
     } catch (_e) {
       // Abaikan bila kolom sudah ada
@@ -137,6 +188,39 @@ export const executeWrite = async (query, parameters = []) => {
     return result; // contains { changes, lastInsertRowId }
   } catch (error) {
     console.error("Error writing data: ", error);
-    return null;
+    // Re-throw so callers know the write failed
+    throw error;
+  }
+};
+
+// ========================
+// SETTINGS HELPERS
+// ========================
+
+export const getSetting = async (key, defaultValue = null) => {
+  try {
+    const result = await fetchOne("SELECT value FROM settings WHERE id = ?", [key]);
+    if (result && result.value) {
+      return result.value;
+    }
+    return defaultValue;
+  } catch (error) {
+    console.error("Error fetching setting: ", error);
+    return defaultValue;
+  }
+};
+
+export const saveSetting = async (key, value) => {
+  try {
+    const existing = await fetchOne("SELECT id FROM settings WHERE id = ?", [key]);
+    if (existing) {
+      await executeWrite("UPDATE settings SET value = ? WHERE id = ?", [String(value), key]);
+    } else {
+      await executeWrite("INSERT INTO settings (id, value) VALUES (?, ?)", [key, String(value)]);
+    }
+    return true;
+  } catch (error) {
+    console.error("Error saving setting: ", error);
+    return false;
   }
 };

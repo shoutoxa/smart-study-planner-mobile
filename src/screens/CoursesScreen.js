@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,6 +27,7 @@ export default function CoursesScreen() {
 
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const [refreshing, setRefreshing] = useState(false);
 
   // Form State
   const [courseName, setCourseName] = useState("");
@@ -40,13 +42,16 @@ export default function CoursesScreen() {
     else if (!increment && currentCount > 0) newCount--;
 
     if (newCount !== currentCount) {
-      await executeWrite("UPDATE courses SET absent_count = ? WHERE id = ?", [
-        newCount,
-        id,
-      ]);
-      setTimeout(() => {
-        loadCourses();
-      }, 100);
+      try {
+        await executeWrite("UPDATE courses SET absent_count = ? WHERE id = ?", [
+          newCount,
+          id,
+        ]);
+        await loadCourses();
+      } catch (error) {
+        console.error("Failed to update absence:", error);
+        Alert.alert("Error", "Gagal memperbarui data absensi.");
+      }
     }
   };
 
@@ -121,9 +126,7 @@ export default function CoursesScreen() {
         );
       }
       setModalVisible(false);
-      setTimeout(() => {
-        loadCourses();
-      }, 100);
+      await loadCourses();
     } catch (error) {
       console.error("Failed to save course:", error);
       Alert.alert("Error", "Gagal menyimpan mata kuliah");
@@ -140,10 +143,13 @@ export default function CoursesScreen() {
           text: "Hapus",
           style: "destructive",
           onPress: async () => {
-            await executeWrite("DELETE FROM courses WHERE id = ?", [id]);
-            setTimeout(() => {
-              loadCourses();
-            }, 100);
+            try {
+              await executeWrite("DELETE FROM courses WHERE id = ?", [id]);
+              await loadCourses();
+            } catch (error) {
+              console.error("Failed to delete course:", error);
+              Alert.alert("Error", "Gagal menghapus mata kuliah.");
+            }
           },
         },
       ],
@@ -378,6 +384,16 @@ export default function CoursesScreen() {
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderCourseItem}
         ListHeaderComponent={renderHeader}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadCourses().then(() => setRefreshing(false));
+            }}
+            tintColor={isDark ? "#cbd5e1" : "#475569"}
+          />
+        }
         contentContainerStyle={{
           paddingBottom: 160,
         }}
@@ -391,12 +407,13 @@ export default function CoursesScreen() {
             </View>
           ) : (
             <View className="py-20 flex items-center justify-center">
-              <Ionicons
-                name="library-outline"
-                size={80}
-                color={isDark ? "#334155" : "#CBD5E1"}
-                className="mb-4"
-              />
+              <View className="mb-4">
+                <Ionicons
+                  name="library-outline"
+                  size={80}
+                  color={isDark ? "#334155" : "#CBD5E1"}
+                />
+              </View>
               <Text className="text-slate-800 dark:text-white text-lg font-bold">
                 Data Kosong
               </Text>
