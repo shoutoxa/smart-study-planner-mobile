@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -11,45 +11,42 @@ import {
   Platform,
   ScrollView,
   RefreshControl,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { fetchAll, executeWrite, getSetting } from "../database/dbHelper";
+import { fetchAll, executeWrite } from "../database/dbHelper";
 import { useColorScheme } from "react-native";
 import DateTimePicker, {
   DateTimePickerAndroid,
 } from "@react-native-community/datetimepicker";
 import InteractiveCard from "../components/InteractiveCard";
-import * as Notifications from "expo-notifications";
+import {
+  formatDeadlineForDisplay,
+  parseDeadlineToDate,
+  parseDeadlineToTimestamp,
+} from "../utils/dateTime";
+import { syncTaskNotifications } from "../services/notificationService";
 
-export default function TasksScreen() {
+export default function TasksScreen({ route }) {
   const [tasks, setTasks] = useState([]);
   const [courses, setCourses] = useState([]);
   const [isModalVisible, setModalVisible] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const lastOpenAddTokenRef = useRef(null);
 
-  // Parse deadline string "DD/MM/YYYY HH:mm" into a Date object
-  const parseDeadline = (deadlineStr) => {
-    if (!deadlineStr) return null;
-    const parts = deadlineStr.split(" ");
-    if (parts.length !== 2) return null;
-    const [d, m, y] = parts[0].split("/");
-    const [h, min] = parts[1].split(":");
-    if (!d || !m || !y || !h || !min) return null;
-    return new Date(+y, +m - 1, +d, +h, +min);
-  };
-
-  // Stats — recalculate with fresh `now` each time tasks change
+  // Stats recalculate with fresh `now` each time tasks change
   const { totalTasks, selesaiTasks, terlewatTasks, belumTasks } = useMemo(() => {
-    const now = new Date();
+    const now = Date.now();
     const total = tasks.length;
     const selesai = tasks.filter((t) => t.status === "Selesai").length;
     const terlewat = tasks.filter((t) => {
       if (t.status === "Selesai" || !t.deadline) return false;
-      const deadlineDate = parseDeadline(t.deadline);
-      return deadlineDate && deadlineDate < now;
+      const deadlineAt = t.deadline_at || parseDeadlineToTimestamp(t.deadline);
+      return deadlineAt && deadlineAt < now;
     }).length;
     return {
       totalTasks: total,
@@ -72,13 +69,16 @@ export default function TasksScreen() {
   const [showPicker, setShowPicker] = useState(false);
   const [dateObj, setDateObj] = useState(new Date());
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
-      let query = `
+      const query = `
         SELECT t.*, c.course_name 
         FROM tasks t 
         LEFT JOIN courses c ON t.course_id = c.id 
-        ORDER BY CASE WHEN t.status = 'Selesai' THEN 1 ELSE 0 END ASC, t.deadline ASC
+        ORDER BY
+          CASE WHEN t.status = 'Selesai' THEN 1 ELSE 0 END ASC,
+          CASE WHEN t.deadline_at IS NULL THEN 1 ELSE 0 END ASC,
+          t.deadline_at ASC
       `;
 
       const tasksData = await fetchAll(query);
@@ -89,78 +89,19 @@ export default function TasksScreen() {
       );
       setCourses(coursesData);
 
-      // Sinkronisasi Jadwal Notifikasi Push Lokal secara Latar Belakang (Non-blocking)
-      syncNotifications(tasksData).catch(console.error);
+      syncTaskNotifications(tasksData).catch(console.error);
     } catch (error) {
       console.error("Failed to load tasks:", error);
     }
-  };
-
-  const syncNotifications = async (tasksData) => {
-    try {
-      const offsetStr = await getSetting("notify_offset_hours", "24");
-      const offsetHours = parseInt(offsetStr, 10) || 24;
-
-      await Notifications.cancelAllScheduledNotificationsAsync();
-
-      for (const t of tasksData) {
-        if (t.status === "Belum Dikerjakan" && t.deadline) {
-          const parts = t.deadline.split(" ");
-          if (parts.length === 2) {
-            const dateParts = parts[0].split("/");
-            const timeParts = parts[1].split(":");
-            if (dateParts.length === 3 && timeParts.length === 2) {
-              const taskDate = new Date(
-                parseInt(dateParts[2], 10),
-                parseInt(dateParts[1], 10) - 1,
-                parseInt(dateParts[0], 10),
-                parseInt(timeParts[0], 10),
-                parseInt(timeParts[1], 10),
-              );
-
-              const now = new Date();
-
-              const notifyTime = new Date(
-                taskDate.getTime() - offsetHours * 60 * 60 * 1000,
-              );
-              
-              if (notifyTime > now) {
-                let notifTitle = "⏰ Pengingat Tugas";
-                let notifBody = `${t.task_name} harus diselesaikan dalam ${offsetHours} jam!`;
-
-                if (offsetHours === 24) {
-                  notifTitle = "📅 Pengingat H-1 Tugas";
-                  notifBody = `Jangan lupa kerjakan tugas: ${t.task_name}`;
-                }
-
-                await Notifications.scheduleNotificationAsync({
-                  content: {
-                    title: notifTitle,
-                    body: notifBody,
-                    sound: true,
-                  },
-                  trigger: {
-                    type: Notifications.SchedulableTriggerInputTypes.DATE,
-                    date: notifyTime,
-                  },
-                });
-              }
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to sync notifications:", e);
-    }
-  };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, []),
+    }, [loadData]),
   );
 
-  const toggleTaskStatus = async (task) => {
+  const toggleTaskStatus = useCallback(async (task) => {
     const newStatus =
       task.status === "Selesai" ? "Belum Dikerjakan" : "Selesai";
     try {
@@ -172,9 +113,9 @@ export default function TasksScreen() {
     } catch (error) {
       console.error("Failed to update status:", error);
     }
-  };
+  }, [loadData]);
 
-  const confirmDelete = (id) => {
+  const confirmDelete = useCallback((id) => {
     Alert.alert("Hapus Tugas", "Apakah Anda yakin ingin menghapus tugas ini?", [
       { text: "Batal", style: "cancel" },
       {
@@ -191,9 +132,9 @@ export default function TasksScreen() {
         },
       },
     ]);
-  };
+  }, [loadData]);
 
-  const openAddModal = () => {
+  const openAddModal = useCallback(() => {
     setEditingTask(null);
     setTaskName("");
     setCourseId("");
@@ -201,9 +142,17 @@ export default function TasksScreen() {
     setDateObj(new Date());
     setPriority("Sedang");
     setModalVisible(true);
-  };
+  }, []);
 
-  const openEditModal = (task) => {
+  useEffect(() => {
+    const openAddToken = route?.params?.openAdd;
+    if (!openAddToken || lastOpenAddTokenRef.current === openAddToken) return;
+
+    lastOpenAddTokenRef.current = openAddToken;
+    openAddModal();
+  }, [route?.params?.openAdd, openAddModal]);
+
+  const openEditModal = useCallback((task) => {
     setEditingTask(task);
     setTaskName(task.task_name || "");
     setCourseId(task.course_id || "");
@@ -211,23 +160,13 @@ export default function TasksScreen() {
     setPriority(task.priority || "Sedang");
     // Parse existing deadline into dateObj for the picker
     if (task.deadline) {
-      const parsed = parseDeadline(task.deadline);
+      const parsed = parseDeadlineToDate(task.deadline);
       setDateObj(parsed || new Date());
     } else {
       setDateObj(new Date());
     }
     setModalVisible(true);
-  };
-
-  const formatDate = (date) => {
-    const d = new Date(date);
-    const day = d.getDate().toString().padStart(2, "0");
-    const month = (d.getMonth() + 1).toString().padStart(2, "0");
-    const year = d.getFullYear();
-    const hours = d.getHours().toString().padStart(2, "0");
-    const minutes = d.getMinutes().toString().padStart(2, "0");
-    return `${day}/${month}/${year} ${hours}:${minutes}`;
-  };
+  }, []);
 
   const onDateChange = (event, selectedDate) => {
     if (Platform.OS === "android") {
@@ -244,7 +183,7 @@ export default function TasksScreen() {
     // Update value saat user memilih
     if (selectedDate) {
       setDateObj(selectedDate);
-      setDeadline(formatDate(selectedDate));
+      setDeadline(formatDeadlineForDisplay(selectedDate));
     }
   };
 
@@ -270,7 +209,7 @@ export default function TasksScreen() {
                   timeDate.getMinutes(),
                 );
                 setDateObj(finalDate);
-                setDeadline(formatDate(finalDate));
+                setDeadline(formatDeadlineForDisplay(finalDate));
               }
             },
           });
@@ -282,21 +221,30 @@ export default function TasksScreen() {
   };
 
   const saveTask = async () => {
+    if (isSaving) return;
+
     if (!taskName.trim()) {
       Alert.alert("Error", "Nama tugas tidak boleh kosong");
       return;
     }
 
+    const deadlineAt = deadline ? parseDeadlineToTimestamp(deadline) : null;
+    if (deadline && deadlineAt === null) {
+      Alert.alert("Error", "Format deadline tidak valid.");
+      return;
+    }
+
     try {
+      setIsSaving(true);
       if (editingTask) {
         await executeWrite(
-          "UPDATE tasks SET course_id=?, task_name=?, deadline=?, priority=? WHERE id=?",
-          [courseId || null, taskName, deadline, priority, editingTask.id],
+          "UPDATE tasks SET course_id=?, task_name=?, deadline=?, deadline_at=?, priority=? WHERE id=?",
+          [courseId || null, taskName, deadline, deadlineAt, priority, editingTask.id],
         );
       } else {
         await executeWrite(
-          "INSERT INTO tasks (course_id, task_name, deadline, priority, status) VALUES (?, ?, ?, ?, ?)",
-          [courseId || null, taskName, deadline, priority, "Belum Dikerjakan"],
+          "INSERT INTO tasks (course_id, task_name, deadline, deadline_at, priority, status) VALUES (?, ?, ?, ?, ?, ?)",
+          [courseId || null, taskName, deadline, deadlineAt, priority, "Belum Dikerjakan"],
         );
       }
       setModalVisible(false);
@@ -304,6 +252,8 @@ export default function TasksScreen() {
     } catch (error) {
       console.error("Failed to save task:", error);
       Alert.alert("Error", "Gagal menyimpan tugas");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -332,12 +282,19 @@ export default function TasksScreen() {
 
     return (
       <View className="mb-4">
-        <InteractiveCard onPress={() => openEditModal(item)}>
+        <InteractiveCard
+          onPress={() => openEditModal(item)}
+          accessibilityLabel={`Buka tugas ${item.task_name}`}
+          accessibilityHint="Membuka formulir edit tugas"
+        >
           <View className="bg-white dark:bg-slate-800 rounded-[28px] p-5 shadow-sm shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex-row">
             <TouchableOpacity
               onPress={() => toggleTaskStatus(item)}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              className="w-7 h-7 rounded-[10px] items-center justify-center mr-4 mt-1 shadow-sm border"
+              accessibilityRole="checkbox"
+              accessibilityLabel={`${isCompleted ? "Tandai belum selesai" : "Tandai selesai"} untuk ${item.task_name}`}
+              accessibilityState={{ checked: isCompleted }}
+              className="w-11 h-11 rounded-[14px] items-center justify-center mr-3 mt-1 border"
               style={{
                 backgroundColor: isCompleted
                   ? "#10b981"
@@ -412,7 +369,13 @@ export default function TasksScreen() {
                   ) : null}
                 </View>
 
-                <TouchableOpacity onPress={() => confirmDelete(item.id)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <TouchableOpacity
+                  onPress={() => confirmDelete(item.id)}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Hapus tugas ${item.task_name}`}
+                  className="w-11 h-11 items-center justify-center rounded-full"
+                >
                   <Ionicons name="trash-outline" size={18} color="#94A3B8" />
                 </TouchableOpacity>
               </View>
@@ -421,7 +384,7 @@ export default function TasksScreen() {
         </InteractiveCard>
       </View>
     );
-  }, [isDark, tasks]);
+  }, [confirmDelete, isDark, openEditModal, toggleTaskStatus]);
 
   return (
     <SafeAreaView className="flex-1 bg-slate-50 dark:bg-[#0F172A]">
@@ -474,7 +437,11 @@ export default function TasksScreen() {
 
             {/* Add Button Full Width */}
             <View className="mb-8">
-              <InteractiveCard onPress={openAddModal}>
+              <InteractiveCard
+                onPress={openAddModal}
+                accessibilityLabel="Tambah tugas baru"
+                accessibilityHint="Membuka formulir tugas"
+              >
                 <View className="bg-indigo-600 dark:bg-indigo-500 rounded-[24px] py-4 flex-row items-center justify-center shadow-md shadow-indigo-500/20">
                   <Ionicons name="add-circle" size={22} color="white" />
                   <Text className="text-white font-bold text-[16px] ml-2 tracking-wide">
@@ -597,7 +564,9 @@ export default function TasksScreen() {
               </Text>
               <TouchableOpacity
                 onPress={() => setModalVisible(false)}
-                className="bg-slate-100 dark:bg-slate-800 p-2 rounded-full"
+                accessibilityRole="button"
+                accessibilityLabel="Tutup formulir tugas"
+                className="bg-slate-100 dark:bg-slate-800 w-11 h-11 rounded-full items-center justify-center"
               >
                 <Ionicons name="close" size={24} color="#94A3B8" />
               </TouchableOpacity>
@@ -629,6 +598,9 @@ export default function TasksScreen() {
               >
                 <TouchableOpacity
                   onPress={() => setCourseId("")}
+                  accessibilityRole="button"
+                  accessibilityLabel="Pilih tugas tanpa mata kuliah"
+                  accessibilityState={{ selected: courseId === "" }}
                   className="px-4 flex justify-center items-center rounded-xl border mr-2 h-11"
                   style={{
                     backgroundColor:
@@ -667,6 +639,9 @@ export default function TasksScreen() {
                   <TouchableOpacity
                     key={c.id}
                     onPress={() => setCourseId(c.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pilih mata kuliah ${c.course_name}`}
+                    accessibilityState={{ selected: courseId === c.id }}
                     className="px-4 flex justify-center items-center rounded-xl border mr-2 h-11"
                     style={{
                       backgroundColor:
@@ -715,6 +690,8 @@ export default function TasksScreen() {
                     setShowPicker(true);
                   }
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Pilih deadline tugas"
                 className="bg-slate-50 dark:bg-[#1E293B] border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-4 mb-6 flex-row justify-between items-center"
               >
                 <Text
@@ -740,6 +717,8 @@ export default function TasksScreen() {
                   />
                   <TouchableOpacity
                     onPress={() => setShowPicker(false)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Konfirmasi waktu deadline"
                     className="bg-blue-500 rounded-xl py-2 items-center mb-4"
                   >
                     <Text className="text-white font-bold text-sm">Konfirmasi Waktu</Text>
@@ -755,7 +734,10 @@ export default function TasksScreen() {
                   <TouchableOpacity
                     key={p}
                     onPress={() => setPriority(p)}
-                    className="flex-1 py-3 items-center border-b-2 justify-center"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pilih prioritas ${p}`}
+                    accessibilityState={{ selected: priority === p }}
+                    className="flex-1 min-h-[44px] items-center border-b-2 justify-center"
                     style={{
                       borderBottomColor:
                         priority === p
@@ -786,11 +768,26 @@ export default function TasksScreen() {
 
               <TouchableOpacity
                 onPress={saveTask}
-                className="bg-blue-500 rounded-2xl py-4 items-center shadow-lg shadow-blue-500/30 dark:shadow-none"
+                disabled={isSaving}
+                accessibilityRole="button"
+                accessibilityLabel={isSaving ? "Sedang menyimpan tugas" : "Simpan tugas"}
+                accessibilityState={{ disabled: isSaving }}
+                className={`rounded-2xl min-h-[52px] items-center justify-center shadow-lg shadow-blue-500/30 dark:shadow-none ${
+                  isSaving ? "bg-blue-400" : "bg-blue-500"
+                }`}
               >
-                <Text className="text-white font-bold text-base">
-                  Simpan Tugas
-                </Text>
+                {isSaving ? (
+                  <View className="flex-row items-center">
+                    <ActivityIndicator color="#ffffff" size="small" />
+                    <Text className="text-white font-bold text-base ml-2">
+                      Menyimpan...
+                    </Text>
+                  </View>
+                ) : (
+                  <Text className="text-white font-bold text-base">
+                    Simpan Tugas
+                  </Text>
+                )}
               </TouchableOpacity>
             </ScrollView>
           </KeyboardAvoidingView>

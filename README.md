@@ -6,8 +6,8 @@ Aplikasi perencana studi (study planner) seluler komprehensif yang dibangun deng
 
 - **Widget Layar Beranda Android:** Periksa jadwal harian Anda secara instan langsung dari layar utama _smartphone_ tanpa perlu membuka aplikasi. Kini diperbarui dengan sistem **Penyegaran Otomatis (Auto-Refresh)** setiap pergantian hari.
 - **Pelacak Ketidakhadiran (Absensi):** Lacak "Jatah Bolos" Anda per mata kuliah. Bilah kemajuan (progress bar) visual melindungi Anda agar tidak melewati batas maksimal absensi.
-- **Pengingat Deadline Dinamis:** Jangan pernah melewatkan tugas! Aplikasi ini akan menjadwalkan notifikasi _push_ lokal asli yang memperingatkan Anda tepat **24 Jam** dan **1 Jam** sebelum deadline tugas.
-- **High-Craft Mobile UX & Performa Optimal:** Peningkatan interaksi responsif pada kartu, target sentuh yang diperluas (mengadopsi _Fitts' Law_), dan rendering _list_ minim lag berkat memoziation `useCallback` menyeluruh.
+- **Pengingat Deadline Dinamis:** Jangan pernah melewatkan tugas! Aplikasi ini menjadwalkan notifikasi _push_ lokal sesuai preferensi waktu pengingat yang Anda pilih.
+- **High-Craft Mobile UX & Performa Optimal:** Peningkatan interaksi responsif pada kartu, target sentuh yang diperluas (mengadopsi _Fitts' Law_), dan rendering _list_ minim lag berkat memoization `useCallback` menyeluruh.
 - **Stabilitas Database & Sinkronisasi Ekspor/Impor:** Menggunakan operasi _asynchronous_ (await) penuh dan implementasi SQLite WAL _checkpointing_ untuk menjamin database 100% andal, mencegah _data loss_, serta didukung oleh API `expo-file-system` modern.
 - **Layar Pengaturan (Settings):** Pusat kendali baru yang fungsional untuk memudahkan Anda mencadangkan (ekspor) atau memulihkan (impor) data studi Anda.
 

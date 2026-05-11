@@ -85,7 +85,7 @@ export function ScheduleWidget({ schedules = [] }) {
             style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
           >
             <TextWidget
-              text="Wah.. Bebas jadwal hari ini 🎉"
+              text="Bebas jadwal hari ini"
               style={{ fontSize: 14, color: "#64748B" }}
             />
           </FlexWidget>

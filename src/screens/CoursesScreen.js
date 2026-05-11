@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Platform,
   ScrollView,
   RefreshControl,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,15 +20,17 @@ import { fetchAll, executeWrite } from "../database/dbHelper";
 import { useColorScheme } from "react-native";
 import InteractiveCard from "../components/InteractiveCard";
 
-export default function CoursesScreen() {
+export default function CoursesScreen({ route }) {
   const [courses, setCourses] = useState([]);
   const [isModalVisible, setModalVisible] = useState(false);
   const [editingCourse, setEditingCourse] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const [refreshing, setRefreshing] = useState(false);
+  const lastOpenAddTokenRef = useRef(null);
 
   // Form State
   const [courseName, setCourseName] = useState("");
@@ -36,7 +39,18 @@ export default function CoursesScreen() {
   const [semester, setSemester] = useState("");
   const [maxAbsences, setMaxAbsences] = useState("3");
 
-  const updateAbsence = async (id, currentCount, max, increment) => {
+  const loadCourses = useCallback(async () => {
+    try {
+      const data = await fetchAll(
+        "SELECT * FROM courses ORDER BY course_name ASC",
+      );
+      setCourses(data);
+    } catch (error) {
+      console.error("Failed to load courses:", error);
+    }
+  }, []);
+
+  const updateAbsence = useCallback(async (id, currentCount, max, increment) => {
     let newCount = currentCount;
     if (increment && currentCount < max) newCount++;
     else if (!increment && currentCount > 0) newCount--;
@@ -53,26 +67,15 @@ export default function CoursesScreen() {
         Alert.alert("Error", "Gagal memperbarui data absensi.");
       }
     }
-  };
-
-  const loadCourses = async () => {
-    try {
-      const data = await fetchAll(
-        "SELECT * FROM courses ORDER BY course_name ASC",
-      );
-      setCourses(data);
-    } catch (error) {
-      console.error("Failed to load courses:", error);
-    }
-  };
+  }, [loadCourses]);
 
   useFocusEffect(
     useCallback(() => {
       loadCourses();
-    }, []),
+    }, [loadCourses]),
   );
 
-  const openAddModal = () => {
+  const openAddModal = useCallback(() => {
     setEditingCourse(null);
     setCourseName("");
     setCredits("");
@@ -80,9 +83,17 @@ export default function CoursesScreen() {
     setSemester("");
     setMaxAbsences("3");
     setModalVisible(true);
-  };
+  }, []);
 
-  const openEditModal = (course) => {
+  useEffect(() => {
+    const openAddToken = route?.params?.openAdd;
+    if (!openAddToken || lastOpenAddTokenRef.current === openAddToken) return;
+
+    lastOpenAddTokenRef.current = openAddToken;
+    openAddModal();
+  }, [route?.params?.openAdd, openAddModal]);
+
+  const openEditModal = useCallback((course) => {
     setEditingCourse(course);
     setCourseName(course.course_name);
     setCredits(course.credits ? course.credits.toString() : "");
@@ -90,25 +101,36 @@ export default function CoursesScreen() {
     setSemester(course.semester ? course.semester.toString() : "");
     setMaxAbsences(course.max_absences ? course.max_absences.toString() : "3");
     setModalVisible(true);
-  };
+  }, []);
 
   const saveCourse = async () => {
+    if (isSaving) return;
+
     if (!courseName.trim()) {
       Alert.alert("Error", "Nama mata kuliah tidak boleh kosong");
       return;
     }
 
+    const parsedCredits = Number.parseInt(credits, 10);
+    const parsedSemester = Number.parseInt(semester, 10);
+    const parsedMaxAbsences = Number.parseInt(maxAbsences, 10);
+    const safeCredits = Number.isInteger(parsedCredits) && parsedCredits >= 0 ? parsedCredits : 0;
+    const safeSemester = Number.isInteger(parsedSemester) && parsedSemester >= 0 ? parsedSemester : 0;
+    const safeMaxAbsences =
+      Number.isInteger(parsedMaxAbsences) && parsedMaxAbsences > 0 ? parsedMaxAbsences : 3;
+
     try {
+      setIsSaving(true);
       if (editingCourse) {
         // Update
         await executeWrite(
           "UPDATE courses SET course_name = ?, credits = ?, lecturer_name = ?, semester = ?, max_absences = ? WHERE id = ?",
           [
             courseName,
-            parseInt(credits) || 0,
+            safeCredits,
             lecturer,
-            parseInt(semester) || 0,
-            parseInt(maxAbsences) || 3,
+            safeSemester,
+            safeMaxAbsences,
             editingCourse.id,
           ],
         );
@@ -118,10 +140,10 @@ export default function CoursesScreen() {
           "INSERT INTO courses (course_name, credits, lecturer_name, semester, max_absences) VALUES (?, ?, ?, ?, ?)",
           [
             courseName,
-            parseInt(credits) || 0,
+            safeCredits,
             lecturer,
-            parseInt(semester) || 0,
-            parseInt(maxAbsences) || 3,
+            safeSemester,
+            safeMaxAbsences,
           ],
         );
       }
@@ -130,10 +152,12 @@ export default function CoursesScreen() {
     } catch (error) {
       console.error("Failed to save course:", error);
       Alert.alert("Error", "Gagal menyimpan mata kuliah");
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const confirmDelete = (id) => {
+  const confirmDelete = useCallback((id) => {
     Alert.alert(
       "Hapus Mata Kuliah",
       "Apakah Anda yakin? Semua tugas dan jadwal terkait mata kuliah ini juga akan terhapus.",
@@ -154,7 +178,7 @@ export default function CoursesScreen() {
         },
       ],
     );
-  };
+  }, [loadCourses]);
 
   const renderCourseItem = useCallback(({ item }) => {
     const iconStyle = [
@@ -242,7 +266,9 @@ export default function CoursesScreen() {
                       )
                     }
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                    className="w-8 h-8 rounded-full bg-slate-50 dark:bg-slate-700 items-center justify-center active:bg-slate-200 dark:active:bg-slate-600"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Kurangi absen ${item.course_name}`}
+                    className="w-11 h-11 rounded-full bg-slate-50 dark:bg-slate-700 items-center justify-center active:bg-slate-200 dark:active:bg-slate-600"
                   >
                     <Ionicons
                       name="remove"
@@ -265,7 +291,9 @@ export default function CoursesScreen() {
                       )
                     }
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                    className="w-8 h-8 rounded-full bg-slate-50 dark:bg-slate-700 items-center justify-center active:bg-slate-200 dark:active:bg-slate-600"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Tambah absen ${item.course_name}`}
+                    className="w-11 h-11 rounded-full bg-slate-50 dark:bg-slate-700 items-center justify-center active:bg-slate-200 dark:active:bg-slate-600"
                   >
                     <Ionicons
                       name="add"
@@ -290,7 +318,9 @@ export default function CoursesScreen() {
             <View className="flex-row justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-700/50">
               <TouchableOpacity
                 onPress={() => openEditModal(item)}
-                className="flex-1 bg-slate-50 dark:bg-slate-700/50 rounded-2xl py-3 flex-row items-center justify-center border border-slate-100 dark:border-slate-600"
+                accessibilityRole="button"
+                accessibilityLabel={`Edit mata kuliah ${item.course_name}`}
+                className="flex-1 bg-slate-50 dark:bg-slate-700/50 rounded-2xl min-h-[44px] flex-row items-center justify-center border border-slate-100 dark:border-slate-600"
               >
                 <Ionicons
                   name="pencil"
@@ -303,7 +333,9 @@ export default function CoursesScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => confirmDelete(item.id)}
-                className="flex-1 bg-rose-50 dark:bg-rose-500/10 rounded-2xl py-3 flex-row items-center justify-center border border-rose-100 dark:border-rose-500/20"
+                accessibilityRole="button"
+                accessibilityLabel={`Hapus mata kuliah ${item.course_name}`}
+                className="flex-1 bg-rose-50 dark:bg-rose-500/10 rounded-2xl min-h-[44px] flex-row items-center justify-center border border-rose-100 dark:border-rose-500/20"
               >
                 <Ionicons name="trash" size={16} color="#F43F5E" />
                 <Text className="text-rose-500 font-bold ml-2 text-sm">
@@ -346,7 +378,11 @@ export default function CoursesScreen() {
       </View>
 
       <View className="px-5 mb-6">
-        <InteractiveCard onPress={openAddModal}>
+        <InteractiveCard
+          onPress={openAddModal}
+          accessibilityLabel="Tambah mata kuliah baru"
+          accessibilityHint="Membuka formulir mata kuliah"
+        >
           <View className="bg-emerald-500 dark:bg-emerald-600 rounded-[20px] py-3 flex-row items-center justify-center shadow-md shadow-emerald-500/20">
             <Ionicons name="add-circle" size={22} color="white" />
             <Text className="text-white font-bold text-[15px] ml-2 tracking-wide">
@@ -362,6 +398,7 @@ export default function CoursesScreen() {
           <Ionicons name="search" size={18} color="#94A3B8" />
           <TextInput
             className="flex-1 ml-2 text-slate-800 dark:text-white text-[14px] font-medium"
+            accessibilityLabel="Cari mata kuliah"
             placeholder="Cari mata kuliah..."
             placeholderTextColor="#94A3B8"
             value={searchQuery}
@@ -444,7 +481,9 @@ export default function CoursesScreen() {
               </Text>
               <TouchableOpacity
                 onPress={() => setModalVisible(false)}
-                className="bg-slate-100 dark:bg-slate-800 p-2 rounded-full"
+                accessibilityRole="button"
+                accessibilityLabel="Tutup formulir mata kuliah"
+                className="bg-slate-100 dark:bg-slate-800 w-11 h-11 rounded-full items-center justify-center"
               >
                 <Ionicons name="close" size={24} color="#94A3B8" />
               </TouchableOpacity>
@@ -516,11 +555,26 @@ export default function CoursesScreen() {
               />
               <TouchableOpacity
                 onPress={saveCourse}
-                className="bg-blue-500 rounded-2xl py-4 items-center shadow-lg shadow-blue-500/30 dark:shadow-none"
+                disabled={isSaving}
+                accessibilityRole="button"
+                accessibilityLabel={isSaving ? "Sedang menyimpan mata kuliah" : "Simpan mata kuliah"}
+                accessibilityState={{ disabled: isSaving }}
+                className={`rounded-2xl min-h-[52px] items-center justify-center shadow-lg shadow-blue-500/30 dark:shadow-none ${
+                  isSaving ? "bg-blue-400" : "bg-blue-500"
+                }`}
               >
-                <Text className="text-white font-bold text-base">
-                  Simpan Data
-                </Text>
+                {isSaving ? (
+                  <View className="flex-row items-center">
+                    <ActivityIndicator color="#ffffff" size="small" />
+                    <Text className="text-white font-bold text-base ml-2">
+                      Menyimpan...
+                    </Text>
+                  </View>
+                ) : (
+                  <Text className="text-white font-bold text-base">
+                    Simpan Data
+                  </Text>
+                )}
               </TouchableOpacity>
             </ScrollView>
           </KeyboardAvoidingView>

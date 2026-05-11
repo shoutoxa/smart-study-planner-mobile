@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Platform,
   ScrollView,
   RefreshControl,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,26 +19,29 @@ import { fetchAll, executeWrite } from "../database/dbHelper";
 import { useColorScheme } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import InteractiveCard from "../components/InteractiveCard";
+import { parseTimeToMinutes } from "../utils/timeRange";
 
-export default function SchedulesScreen() {
+const DAYS_OF_WEEK = [
+  "Senin",
+  "Selasa",
+  "Rabu",
+  "Kamis",
+  "Jumat",
+  "Sabtu",
+  "Minggu",
+];
+
+export default function SchedulesScreen({ route }) {
   const [schedules, setSchedules] = useState({});
   const [courses, setCourses] = useState([]);
   const [isModalVisible, setModalVisible] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const lastOpenAddTokenRef = useRef(null);
 
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const [refreshing, setRefreshing] = useState(false);
-
-  const daysOfWeek = [
-    "Senin",
-    "Selasa",
-    "Rabu",
-    "Kamis",
-    "Jumat",
-    "Sabtu",
-    "Minggu",
-  ];
 
   // Form State
   const [courseId, setCourseId] = useState("");
@@ -53,7 +57,7 @@ export default function SchedulesScreen() {
   const [startTimeObj, setStartTimeObj] = useState(new Date());
   const [endTimeObj, setEndTimeObj] = useState(new Date());
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const scheduleData = await fetchAll(
         `SELECT cs.*, c.course_name, c.lecturer_name 
@@ -73,7 +77,7 @@ export default function SchedulesScreen() {
       );
 
       const grouped = {};
-      daysOfWeek.forEach((day) => {
+      DAYS_OF_WEEK.forEach((day) => {
         grouped[day] = [];
       });
       scheduleData.forEach((item) => {
@@ -92,23 +96,24 @@ export default function SchedulesScreen() {
     } catch (error) {
       console.error("Failed to load schedules:", error);
     }
-  };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, []),
+    }, [loadData]),
   );
 
   const parseTimeStr = (timeStr) => {
-    if (!timeStr) return new Date();
-    const [hours, minutes] = timeStr.split(":");
+    const totalMinutes = parseTimeToMinutes(timeStr);
+    if (totalMinutes === null) return new Date();
+
     const d = new Date();
-    d.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+    d.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
     return d;
   };
 
-  const openAddModal = () => {
+  const openAddModal = useCallback(() => {
     setEditingSchedule(null);
     setCourseId("");
     setDayOfWeek("Senin");
@@ -119,9 +124,17 @@ export default function SchedulesScreen() {
     setRoom("");
     setClassType("Teori");
     setModalVisible(true);
-  };
+  }, []);
 
-  const openEditModal = (schedule) => {
+  useEffect(() => {
+    const openAddToken = route?.params?.openAdd;
+    if (!openAddToken || lastOpenAddTokenRef.current === openAddToken) return;
+
+    lastOpenAddTokenRef.current = openAddToken;
+    openAddModal();
+  }, [route?.params?.openAdd, openAddModal]);
+
+  const openEditModal = useCallback((schedule) => {
     setEditingSchedule(schedule);
     setCourseId(schedule.course_id);
     setDayOfWeek(schedule.day_of_week);
@@ -132,7 +145,7 @@ export default function SchedulesScreen() {
     setRoom(schedule.room || "");
     setClassType(schedule.class_type || "Teori");
     setModalVisible(true);
-  };
+  }, []);
 
   const formatTime = (date) => {
     const d = new Date(date);
@@ -158,6 +171,8 @@ export default function SchedulesScreen() {
   };
 
   const saveSchedule = async () => {
+    if (isSaving) return;
+
     if (!courseId || !startTime || !endTime) {
       Alert.alert(
         "Error",
@@ -166,7 +181,49 @@ export default function SchedulesScreen() {
       return;
     }
 
+    const startMinutes = parseTimeToMinutes(startTime);
+    const endMinutes = parseTimeToMinutes(endTime);
+
+    if (startMinutes === null || endMinutes === null) {
+      Alert.alert("Error", "Format jam tidak valid");
+      return;
+    }
+
+    if (endMinutes <= startMinutes) {
+      Alert.alert("Error", "Jam selesai harus lebih besar dari jam mulai");
+      return;
+    }
+
     try {
+      setIsSaving(true);
+      let conflictQuery = `
+        SELECT cs.*, c.course_name
+        FROM class_schedules cs
+        LEFT JOIN courses c ON cs.course_id = c.id
+        WHERE cs.day_of_week = ?
+          AND cs.is_active = 1
+          AND cs.start_time < ?
+          AND cs.end_time > ?
+      `;
+      const conflictParams = [dayOfWeek, endTime, startTime];
+
+      if (editingSchedule) {
+        conflictQuery += " AND cs.id != ?";
+        conflictParams.push(editingSchedule.id);
+      }
+
+      conflictQuery += " LIMIT 1";
+
+      const conflicts = await fetchAll(conflictQuery, conflictParams);
+      if (conflicts.length > 0) {
+        const conflict = conflicts[0];
+        Alert.alert(
+          "Jadwal Bentrok",
+          `Bentrok dengan ${conflict.course_name || "jadwal lain"} (${conflict.start_time}-${conflict.end_time}).`,
+        );
+        return;
+      }
+
       if (editingSchedule) {
         await executeWrite(
           "UPDATE class_schedules SET course_id=?, day_of_week=?, start_time=?, end_time=?, room=?, class_type=? WHERE id=?",
@@ -191,10 +248,12 @@ export default function SchedulesScreen() {
     } catch (error) {
       console.error("Failed to save schedule:", error);
       Alert.alert("Error", "Gagal menyimpan jadwal");
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const confirmDelete = (id) => {
+  const confirmDelete = useCallback((id) => {
     Alert.alert("Hapus Jadwal", "Apakah Anda yakin?", [
       { text: "Batal", style: "cancel" },
       {
@@ -211,10 +270,10 @@ export default function SchedulesScreen() {
         },
       },
     ]);
-  };
+  }, [loadData]);
 
   const renderGroupedSchedules = useCallback(() => {
-    return daysOfWeek.map((day) => {
+    return DAYS_OF_WEEK.map((day) => {
       const daySchedules = schedules[day];
       if (!daySchedules || daySchedules.length === 0) return null;
 
@@ -259,7 +318,9 @@ export default function SchedulesScreen() {
                         <TouchableOpacity
                           onPress={() => openEditModal(item)}
                           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                          className="p-2"
+                          accessibilityRole="button"
+                          accessibilityLabel={`Edit jadwal ${item.course_name}`}
+                          className="w-11 h-11 items-center justify-center"
                         >
                           <Ionicons
                             name="pencil"
@@ -270,7 +331,9 @@ export default function SchedulesScreen() {
                         <TouchableOpacity
                           onPress={() => confirmDelete(item.id)}
                           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                          className="p-2"
+                          accessibilityRole="button"
+                          accessibilityLabel={`Hapus jadwal ${item.course_name}`}
+                          className="w-11 h-11 items-center justify-center"
                         >
                           <Ionicons name="trash" size={16} color="#F43F5E" />
                         </TouchableOpacity>
@@ -348,7 +411,11 @@ export default function SchedulesScreen() {
         </View>
 
         <View className="px-5 mb-8">
-          <InteractiveCard onPress={openAddModal}>
+          <InteractiveCard
+            onPress={openAddModal}
+            accessibilityLabel="Tambah jadwal kuliah baru"
+            accessibilityHint="Membuka formulir jadwal"
+          >
             <View className="bg-indigo-600 dark:bg-indigo-500 rounded-[24px] py-4 flex-row items-center justify-center shadow-md shadow-indigo-500/20">
               <Ionicons name="add-circle" size={22} color="white" />
               <Text className="text-white font-bold text-[16px] ml-2 tracking-wide">
@@ -400,7 +467,9 @@ export default function SchedulesScreen() {
               </Text>
               <TouchableOpacity
                 onPress={() => setModalVisible(false)}
-                className="bg-slate-100 dark:bg-slate-800 p-2 rounded-full"
+                accessibilityRole="button"
+                accessibilityLabel="Tutup formulir jadwal"
+                className="bg-slate-100 dark:bg-slate-800 w-11 h-11 rounded-full items-center justify-center"
               >
                 <Ionicons name="close" size={24} color="#94A3B8" />
               </TouchableOpacity>
@@ -423,6 +492,9 @@ export default function SchedulesScreen() {
                   <TouchableOpacity
                     key={c.id}
                     onPress={() => setCourseId(c.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pilih mata kuliah ${c.course_name}`}
+                    accessibilityState={{ selected: courseId === c.id }}
                     className="px-4 py-3 rounded-xl border mr-2 h-11 justify-center align-middle"
                     style={{
                       backgroundColor:
@@ -473,10 +545,13 @@ export default function SchedulesScreen() {
                 showsHorizontalScrollIndicator={false}
                 className="mb-6 h-12"
               >
-                {daysOfWeek.map((day) => (
+                {DAYS_OF_WEEK.map((day) => (
                   <TouchableOpacity
                     key={day}
                     onPress={() => setDayOfWeek(day)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pilih hari ${day}`}
+                    accessibilityState={{ selected: dayOfWeek === day }}
                     className="px-4 flex justify-center items-center rounded-xl border mr-2 h-11"
                     style={{
                       backgroundColor:
@@ -521,6 +596,8 @@ export default function SchedulesScreen() {
                   </Text>
                   <TouchableOpacity
                     onPress={() => setShowStartPicker(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Pilih jam mulai"
                     className="bg-slate-50 flex-row justify-between items-center dark:bg-[#1E293B] border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-4"
                   >
                     <Text
@@ -558,6 +635,8 @@ export default function SchedulesScreen() {
                   </Text>
                   <TouchableOpacity
                     onPress={() => setShowEndPicker(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Pilih jam selesai"
                     className="bg-slate-50 flex-row justify-between items-center dark:bg-[#1E293B] border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-4"
                   >
                     <Text
@@ -610,7 +689,10 @@ export default function SchedulesScreen() {
                   <TouchableOpacity
                     key={type}
                     onPress={() => setClassType(type)}
-                    className="flex-1 py-3 items-center border-b-2 justify-center"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pilih jenis kelas ${type}`}
+                    accessibilityState={{ selected: classType === type }}
+                    className="flex-1 min-h-[44px] items-center border-b-2 justify-center"
                     style={{
                       borderColor:
                         classType === type
@@ -641,11 +723,26 @@ export default function SchedulesScreen() {
 
               <TouchableOpacity
                 onPress={saveSchedule}
-                className="bg-blue-500 rounded-2xl py-4 items-center shadow-lg shadow-blue-500/30 dark:shadow-none"
+                disabled={isSaving}
+                accessibilityRole="button"
+                accessibilityLabel={isSaving ? "Sedang menyimpan jadwal" : "Simpan jadwal"}
+                accessibilityState={{ disabled: isSaving }}
+                className={`rounded-2xl min-h-[52px] items-center justify-center shadow-lg shadow-blue-500/30 dark:shadow-none ${
+                  isSaving ? "bg-blue-400" : "bg-blue-500"
+                }`}
               >
-                <Text className="text-white font-bold text-base">
-                  Simpan Jadwal
-                </Text>
+                {isSaving ? (
+                  <View className="flex-row items-center">
+                    <ActivityIndicator color="#ffffff" size="small" />
+                    <Text className="text-white font-bold text-base ml-2">
+                      Menyimpan...
+                    </Text>
+                  </View>
+                ) : (
+                  <Text className="text-white font-bold text-base">
+                    Simpan Jadwal
+                  </Text>
+                )}
               </TouchableOpacity>
             </ScrollView>
           </KeyboardAvoidingView>

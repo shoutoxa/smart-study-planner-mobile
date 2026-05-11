@@ -1,9 +1,8 @@
 import React from "react";
-import { View, TouchableOpacity, Text, Platform } from "react-native";
+import { Platform } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "react-native";
 // Import Screens
 import DashboardScreen from "../screens/DashboardScreen";
@@ -17,49 +16,12 @@ import SettingsScreen from "../screens/SettingsScreen";
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-const CustomTabBarButton = ({ children, onPress }) => {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
-
-  return (
-    <TouchableOpacity
-      style={{
-        top: -20,
-        justifyContent: "center",
-        alignItems: "center",
-        shadowColor: "#3b82f6",
-        shadowOpacity: 0.3,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 5 },
-      }}
-      onPress={onPress}
-    >
-      <View
-        style={{
-          width: 60,
-          height: 60,
-          borderRadius: 30,
-          backgroundColor: "#6366f1", // indigo-500
-          justifyContent: "center",
-          alignItems: "center",
-          borderWidth: 4,
-          borderColor: isDark ? "#1E293B" : "#f8fafc",
-        }}
-      >
-        {children}
-      </View>
-      <Text
-        style={{
-          fontSize: 10,
-          color: "#6366f1",
-          fontWeight: "bold",
-          marginTop: 4,
-        }}
-      >
-        Catatan
-      </Text>
-    </TouchableOpacity>
-  );
+const TAB_LABELS = {
+  Dashboard: "Beranda",
+  "Mata Kuliah": "Matkul",
+  Tugas: "Tugas",
+  Jadwal: "Jadwal",
+  Catatan: "Catatan",
 };
 
 // Tab Navigator for main screens
@@ -78,7 +40,7 @@ function BottomTabNavigator() {
           } else if (route.name === "Mata Kuliah") {
             iconName = focused ? "book" : "book-outline";
           } else if (route.name === "Catatan") {
-            return <Ionicons name="add" size={32} color="#fff" />;
+            iconName = focused ? "document-text" : "document-text-outline";
           } else if (route.name === "Tugas") {
             iconName = focused
               ? "checkmark-circle"
@@ -88,6 +50,7 @@ function BottomTabNavigator() {
           }
           return <Ionicons name={iconName} size={24} color={color} />;
         },
+        tabBarAccessibilityLabel: `Tab ${TAB_LABELS[route.name] || route.name}`,
         tabBarActiveTintColor: isDark ? "#818CF8" : "#4F46E5", // indigo-400 : indigo-600
         tabBarInactiveTintColor: isDark ? "#64748B" : "#94A3B8", // slate-500 : slate-400
         tabBarStyle: {
@@ -120,23 +83,19 @@ function BottomTabNavigator() {
       <Tab.Screen
         name="Dashboard"
         component={DashboardScreen}
-        options={{ tabBarLabel: "Home" }}
+        options={{ tabBarLabel: "Beranda" }}
       />
       <Tab.Screen
         name="Mata Kuliah"
         component={CoursesScreen}
         options={{ tabBarLabel: "Matkul" }}
       />
+      <Tab.Screen name="Tugas" component={TasksScreen} />
+      <Tab.Screen name="Jadwal" component={SchedulesScreen} />
       <Tab.Screen
         name="Catatan"
         component={NotesScreen}
-        options={{
-          tabBarButton: (props) => <CustomTabBarButton {...props} />,
-          tabBarLabel: () => null,
-        }}
       />
-      <Tab.Screen name="Tugas" component={TasksScreen} />
-      <Tab.Screen name="Jadwal" component={SchedulesScreen} />
     </Tab.Navigator>
   );
 }

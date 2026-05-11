@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Platform,
   ScrollView,
   RefreshControl,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,11 +20,13 @@ import { fetchAll, executeWrite } from "../database/dbHelper";
 import { useColorScheme } from "react-native";
 import InteractiveCard from "../components/InteractiveCard";
 
-export default function NotesScreen() {
+export default function NotesScreen({ route }) {
   const [notes, setNotes] = useState([]);
   const [courses, setCourses] = useState([]);
   const [isModalVisible, setModalVisible] = useState(false);
   const [editingNote, setEditingNote] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const lastOpenAddTokenRef = useRef(null);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const [refreshing, setRefreshing] = useState(false);
@@ -37,7 +40,7 @@ export default function NotesScreen() {
   const [content, setContent] = useState("");
   const [courseId, setCourseId] = useState("");
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const notesData = await fetchAll(`
         SELECT n.*, c.course_name 
@@ -54,7 +57,7 @@ export default function NotesScreen() {
     } catch (error) {
       console.error("Failed to load notes:", error);
     }
-  };
+  }, []);
 
   // Build dynamic filter chips from course data
   const filterChips = ["Semua", "Umum", ...courses.map((c) => c.course_name)];
@@ -73,32 +76,43 @@ export default function NotesScreen() {
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, []),
+    }, [loadData]),
   );
 
-  const openAddModal = () => {
+  const openAddModal = useCallback(() => {
     setEditingNote(null);
     setTitle("");
     setContent("");
     setCourseId("");
     setModalVisible(true);
-  };
+  }, []);
 
-  const openEditModal = (note) => {
+  useEffect(() => {
+    const openAddToken = route?.params?.openAdd;
+    if (!openAddToken || lastOpenAddTokenRef.current === openAddToken) return;
+
+    lastOpenAddTokenRef.current = openAddToken;
+    openAddModal();
+  }, [route?.params?.openAdd, openAddModal]);
+
+  const openEditModal = useCallback((note) => {
     setEditingNote(note);
     setTitle(note.title);
     setContent(note.content || "");
     setCourseId(note.course_id || "");
     setModalVisible(true);
-  };
+  }, []);
 
   const saveNote = async () => {
+    if (isSaving) return;
+
     if (!title.trim()) {
       Alert.alert("Error", "Judul catatan tidak boleh kosong");
       return;
     }
 
     try {
+      setIsSaving(true);
       if (editingNote) {
         await executeWrite(
           "UPDATE course_notes SET course_id = ?, title = ?, content = ? WHERE id = ?",
@@ -115,10 +129,12 @@ export default function NotesScreen() {
     } catch (error) {
       console.error("Failed to save note:", error);
       Alert.alert("Error", "Gagal menyimpan catatan");
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const confirmDelete = (id) => {
+  const confirmDelete = useCallback((id) => {
     Alert.alert("Hapus Catatan", "Apakah Anda yakin?", [
       { text: "Batal", style: "cancel" },
       {
@@ -135,7 +151,7 @@ export default function NotesScreen() {
         },
       },
     ]);
-  };
+  }, [loadData]);
 
   // Format relative time from ISO string or SQLite timestamp
   const getRelativeTime = (dateStr) => {
@@ -183,7 +199,11 @@ export default function NotesScreen() {
     if (index === 0 && filteredNotes.length > 2) {
       return (
         <View className="mb-6 px-5">
-          <InteractiveCard onPress={() => openEditModal(item)}>
+          <InteractiveCard
+            onPress={() => openEditModal(item)}
+            accessibilityLabel={`Buka catatan ${item.title}`}
+            accessibilityHint="Membuka formulir edit catatan"
+          >
             <View className="bg-emerald-600 dark:bg-emerald-700 rounded-[28px] p-6 shadow-sm shadow-emerald-600/20 relative overflow-hidden">
               <View className="absolute right-0 top-0 opacity-10">
                 <Ionicons name="bookmark" size={120} color="white" />
@@ -213,7 +233,11 @@ export default function NotesScreen() {
 
     return (
       <View className="mb-4 px-5">
-        <InteractiveCard onPress={() => openEditModal(item)}>
+        <InteractiveCard
+          onPress={() => openEditModal(item)}
+          accessibilityLabel={`Buka catatan ${item.title}`}
+          accessibilityHint="Membuka formulir edit catatan"
+        >
           <View className="bg-white dark:bg-slate-800 rounded-[28px] p-5 shadow-sm shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700">
             <View className="flex-row justify-between items-center mb-4">
               <View className="flex-row items-center">
@@ -238,7 +262,9 @@ export default function NotesScreen() {
               <TouchableOpacity
                 onPress={() => confirmDelete(item.id)}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                className="bg-slate-50 dark:bg-slate-700/50 p-2 rounded-xl"
+                accessibilityRole="button"
+                accessibilityLabel={`Hapus catatan ${item.title}`}
+                className="bg-slate-50 dark:bg-slate-700/50 w-11 h-11 rounded-xl items-center justify-center"
               >
                 <Ionicons name="trash" size={16} color="#F43F5E" />
               </TouchableOpacity>
@@ -259,14 +285,14 @@ export default function NotesScreen() {
                 color={isDark ? "#64748B" : "#94A3B8"}
               />
               <Text className="text-slate-500 dark:text-slate-500 text-xs ml-1.5 font-bold mr-4">
-                {getRelativeTime(item.created_at) || "—"}
+                {getRelativeTime(item.created_at) || "-"}
               </Text>
             </View>
           </View>
         </InteractiveCard>
       </View>
     );
-  }, [isDark, filteredNotes.length]);
+  }, [confirmDelete, filteredNotes.length, isDark, openEditModal]);
 
   const renderHeader = () => (
     <>
@@ -297,7 +323,11 @@ export default function NotesScreen() {
       </View>
 
       <View className="px-5 mb-6">
-        <InteractiveCard onPress={openAddModal}>
+        <InteractiveCard
+          onPress={openAddModal}
+          accessibilityLabel="Tulis catatan baru"
+          accessibilityHint="Membuka formulir catatan"
+        >
           <View className="bg-emerald-500 dark:bg-emerald-600 rounded-[20px] py-3 flex-row items-center justify-center shadow-md shadow-emerald-500/20">
             <Ionicons name="create" size={22} color="white" />
             <Text className="text-white font-bold text-[15px] ml-2 tracking-wide">
@@ -313,6 +343,7 @@ export default function NotesScreen() {
           <Ionicons name="search" size={18} color="#94A3B8" />
           <TextInput
             className="flex-1 ml-2 text-slate-800 dark:text-white text-[14px] font-medium"
+            accessibilityLabel="Cari catatan"
             placeholder="Cari catatan kuliah..."
             placeholderTextColor="#94A3B8"
             value={searchQuery}
@@ -332,7 +363,10 @@ export default function NotesScreen() {
             <TouchableOpacity
               key={chip}
               onPress={() => setActiveChip(chip)}
-              className="px-5 py-2.5 rounded-full mr-3 border"
+              accessibilityRole="button"
+              accessibilityLabel={`Filter catatan ${chip}`}
+              accessibilityState={{ selected: activeChip === chip }}
+              className="px-5 min-h-[44px] rounded-full mr-3 border justify-center"
               style={{
                 backgroundColor:
                   activeChip === chip ? "#3b82f6" : "transparent",
@@ -416,7 +450,9 @@ export default function NotesScreen() {
               <View className="w-full px-6 flex-row justify-between items-center">
                 <TouchableOpacity
                   onPress={() => setModalVisible(false)}
-                  className="bg-slate-100 dark:bg-slate-800 p-2 rounded-full"
+                  accessibilityRole="button"
+                  accessibilityLabel="Tutup formulir catatan"
+                  className="bg-slate-100 dark:bg-slate-800 w-11 h-11 rounded-full items-center justify-center"
                 >
                   <Ionicons
                     name="close"
@@ -425,24 +461,34 @@ export default function NotesScreen() {
                   />
                 </TouchableOpacity>
                 <Text className="text-lg font-bold text-slate-800 dark:text-white">
-                  {editingNote ? "Edit Catatan" : "📝 Tulis Catatan"}
+                  {editingNote ? "Edit Catatan" : "Tulis Catatan"}
                 </Text>
                 <TouchableOpacity
                   onPress={saveNote}
-                  className="bg-blue-500 px-5 py-2 rounded-full"
+                  disabled={isSaving}
+                  accessibilityRole="button"
+                  accessibilityLabel={isSaving ? "Sedang menyimpan catatan" : "Simpan catatan"}
+                  accessibilityState={{ disabled: isSaving }}
+                  className={`min-w-[94px] h-11 px-4 rounded-full items-center justify-center ${
+                    isSaving ? "bg-blue-400" : "bg-blue-500"
+                  }`}
                 >
-                  <Text className="text-white font-bold">Simpan</Text>
+                  {isSaving ? (
+                    <ActivityIndicator color="#ffffff" size="small" />
+                  ) : (
+                    <Text className="text-white font-bold">Simpan</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </View>
 
             <ScrollView
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ padding: 24, paddingBottom: 150 }}
+              contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 28, paddingBottom: 150 }}
               keyboardShouldPersistTaps="handled"
             >
               <TextInput
-                className="text-3xl font-extrabold text-slate-800 dark:text-white mb-6"
+                className="text-3xl font-extrabold text-slate-800 dark:text-white mb-5 min-h-[56px]"
                 placeholder="Judul Catatan..."
                 placeholderTextColor={isDark ? "#475569" : "#94A3B8"}
                 value={title}
@@ -452,12 +498,21 @@ export default function NotesScreen() {
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                className="mb-8"
-                style={{ maxHeight: 40 }}
+                className="mb-7"
+                contentContainerStyle={{
+                  alignItems: "center",
+                  paddingVertical: 4,
+                  paddingRight: 24,
+                }}
+                keyboardShouldPersistTaps="handled"
+                style={{ maxHeight: 56 }}
               >
                 <TouchableOpacity
                   onPress={() => setCourseId("")}
-                  className="px-4 py-2 rounded-xl border mr-2 flex-row items-center"
+                  accessibilityRole="button"
+                  accessibilityLabel="Pilih catatan umum"
+                  accessibilityState={{ selected: courseId === "" }}
+                  className="px-4 h-11 rounded-xl border mr-2 flex-row items-center"
                   style={{
                     backgroundColor:
                       courseId === ""
@@ -504,7 +559,10 @@ export default function NotesScreen() {
                   <TouchableOpacity
                     key={c.id}
                     onPress={() => setCourseId(c.id)}
-                    className="px-4 py-2 rounded-xl border mr-2 flex-row items-center"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pilih mata kuliah ${c.course_name}`}
+                    accessibilityState={{ selected: courseId === c.id }}
+                    className="px-4 h-11 max-w-[230px] rounded-xl border mr-2 flex-row items-center"
                     style={{
                       backgroundColor:
                         courseId === c.id
@@ -532,7 +590,8 @@ export default function NotesScreen() {
                       }
                     />
                     <Text
-                      className="text-sm font-medium ml-2"
+                      className="text-sm font-medium ml-2 flex-shrink"
+                      numberOfLines={1}
                       style={{
                         color:
                           courseId === c.id
